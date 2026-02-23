@@ -70,13 +70,26 @@ async function login(email, password) {
  */
 async function ensureUserProfile(user) {
     const existing = await getUserProfile(user.$id);
-    if (existing) return existing;
 
-    console.log('[Auth] User profile missing, creating now...');
-
-    // Generate encryption key pair
+    // Always ensure the local keypair exists and matches Appwrite
     const keyPair = await Encryption.getOrCreateKeyPair(user.$id);
     const publicKeyB64 = await Encryption.exportPublicKey(keyPair.publicKey);
+
+    if (existing) {
+        if (existing.publicKey !== publicKeyB64) {
+            console.log('[Auth] Public key mismatch, updating profile...');
+            try {
+                await databases.updateDocument(DATABASE_ID, COLLECTIONS.USERS, user.$id, {
+                    publicKey: publicKeyB64,
+                });
+            } catch (e) {
+                console.warn('[Auth] Failed to sync new public key:', e);
+            }
+        }
+        return existing;
+    }
+
+    console.log('[Auth] User profile missing, creating now...');
 
     try {
         return await databases.createDocument(DATABASE_ID, COLLECTIONS.USERS, user.$id, {

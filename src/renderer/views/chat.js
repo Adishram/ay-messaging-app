@@ -714,9 +714,10 @@ const ChatView = {
             return;
         }
 
-        if (this.pendingFile) {
-            const file = this.pendingFile;
-            this.clearPendingFile();
+        const file = this.pendingFile;
+
+        if (file) {
+            document.getElementById('file-preview-bar').classList.add('hidden');
             try {
                 const uploaded = await uploadFile(file);
                 const msg = await sendMessage(
@@ -726,14 +727,17 @@ const ChatView = {
                     this.currentPeerId,
                     this.replyingTo?.id || '', this.replyingTo?.content || ''
                 );
+                this.pendingFile = null; // Clear *after* success
                 this.cancelReply();
                 msg.status = 'sent';
                 this.appendMessage(msg, true);
                 this.scrollToBottom();
                 ContactsView.loadConversations();
             } catch (err) {
-                console.error('Failed to upload file:', err);
-                this.showRetryBanner('File upload failed', () => this.handleSend());
+                console.error('Failed to upload file:', err.message || err);
+                document.getElementById('file-preview-bar').classList.remove('hidden'); // Show bar again
+                this.showRetryBanner('File upload failed: ' + (err.message || 'Unknown error'), () => this.handleSend());
+                return; // Stop here on failure
             }
             input.value = '';
             this.clearDraft();
