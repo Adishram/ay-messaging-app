@@ -422,70 +422,70 @@
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Settings View -->
-  <div id="view-settings" class="view">
-    <div class="settings-container">
-      <div class="settings-header">
-        <button class="btn-icon" id="btn-settings-back">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h2>Settings</h2>
-      </div>
+    <!-- Settings View -->
+    <div id="view-settings" class="view">
+      <div class="settings-container">
+        <div class="settings-header">
+          <button class="btn-icon" id="btn-settings-back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h2>Settings</h2>
+        </div>
 
-      <div class="settings-body">
-        <!-- Profile Picture -->
-        <div class="settings-section">
-          <h3>Profile Picture</h3>
-          <div class="settings-avatar-row">
-            <div class="settings-avatar" id="settings-avatar">
-              <span id="settings-avatar-text"></span>
-              <img id="settings-avatar-img" class="hidden" />
+        <div class="settings-body">
+          <!-- Profile Picture -->
+          <div class="settings-section">
+            <h3>Profile Picture</h3>
+            <div class="settings-avatar-row">
+              <div class="settings-avatar" id="settings-avatar">
+                <span id="settings-avatar-text"></span>
+                <img id="settings-avatar-img" class="hidden" />
+              </div>
+              <div class="settings-avatar-actions">
+                <button class="btn-secondary" id="btn-upload-avatar">Upload Photo</button>
+                <input type="file" id="avatar-file-input" accept="image/*" style="display:none" />
+                <p class="settings-hint">JPG, PNG or WebP. Max 5MB.</p>
+              </div>
             </div>
-            <div class="settings-avatar-actions">
-              <button class="btn-secondary" id="btn-upload-avatar">Upload Photo</button>
-              <input type="file" id="avatar-file-input" accept="image/*" style="display:none" />
-              <p class="settings-hint">JPG, PNG or WebP. Max 5MB.</p>
+            <p id="avatar-status" class="settings-status"></p>
+          </div>
+
+          <!-- Display Name -->
+          <div class="settings-section">
+            <h3>Display Name</h3>
+            <div class="settings-row">
+              <input type="text" id="settings-name" class="settings-input" placeholder="Your name" />
+              <button class="btn-primary settings-btn" id="btn-save-name">Save</button>
             </div>
+            <p id="name-status" class="settings-status"></p>
           </div>
-          <p id="avatar-status" class="settings-status"></p>
-        </div>
 
-        <!-- Display Name -->
-        <div class="settings-section">
-          <h3>Display Name</h3>
-          <div class="settings-row">
-            <input type="text" id="settings-name" class="settings-input" placeholder="Your name" />
-            <button class="btn-primary settings-btn" id="btn-save-name">Save</button>
+          <!-- Change Password -->
+          <div class="settings-section">
+            <h3>Change Password</h3>
+            <div class="input-group">
+              <label>Current Password</label>
+              <input type="password" id="settings-old-password" placeholder="••••••••" />
+            </div>
+            <div class="input-group" style="margin-top:12px">
+              <label>New Password</label>
+              <input type="password" id="settings-new-password" placeholder="Min 8 characters" minlength="8" />
+            </div>
+            <button class="btn-primary settings-btn" id="btn-change-password" style="margin-top:16px">Update
+              Password</button>
+            <p id="password-status" class="settings-status"></p>
           </div>
-          <p id="name-status" class="settings-status"></p>
-        </div>
 
-        <!-- Change Password -->
-        <div class="settings-section">
-          <h3>Change Password</h3>
-          <div class="input-group">
-            <label>Current Password</label>
-            <input type="password" id="settings-old-password" placeholder="••••••••" />
+          <!-- Danger Zone -->
+          <div class="settings-section settings-danger">
+            <h3>Danger Zone</h3>
+            <p>Permanently delete your account and all data. This action cannot be undone.</p>
+            <button class="btn-danger" id="btn-delete-account">Delete My Account</button>
+            <p id="delete-status" class="settings-status"></p>
           </div>
-          <div class="input-group" style="margin-top:12px">
-            <label>New Password</label>
-            <input type="password" id="settings-new-password" placeholder="Min 8 characters" minlength="8" />
-          </div>
-          <button class="btn-primary settings-btn" id="btn-change-password" style="margin-top:16px">Update
-            Password</button>
-          <p id="password-status" class="settings-status"></p>
-        </div>
-
-        <!-- Danger Zone -->
-        <div class="settings-section settings-danger">
-          <h3>Danger Zone</h3>
-          <p>Permanently delete your account and all data. This action cannot be undone.</p>
-          <button class="btn-danger" id="btn-delete-account">Delete My Account</button>
-          <p id="delete-status" class="settings-status"></p>
         </div>
       </div>
     </div>

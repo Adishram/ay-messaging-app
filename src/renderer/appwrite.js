@@ -133,7 +133,7 @@ async function updateLastSeen() {
                 DATABASE_ID,
                 COLLECTIONS.USERS,
                 user.$id,
-                { lastSeen: new Date().toISOString() }
+                { lastSeen: 'online' }
             );
         } catch (e) {
             console.warn('Could not update lastSeen', e);
