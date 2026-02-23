@@ -194,10 +194,10 @@ const ChatView = {
         this.cancelEdit();
         this.closeSearch();
 
-        document.getElementById('chat-area-content').classList.remove('hidden');
         document.querySelector('.chat-empty').classList.add('hidden');
         document.getElementById('chat-input').classList.remove('hidden');
         document.getElementById('chat-header').classList.remove('hidden');
+        document.getElementById('chat-messages').classList.remove('hidden');
 
         const initials = ContactsView.getInitials(peerName);
         document.getElementById('chat-peer-avatar').textContent = initials;

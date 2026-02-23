@@ -74,6 +74,10 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Renderer]: ${message}`);
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
