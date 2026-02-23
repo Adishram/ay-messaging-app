@@ -1,0 +1,33 @@
+{
+  "name": "ay-facetime",
+  "version": "1.0.0",
+  "description": "FaceTime-like video calling & messaging app for macOS",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "make": "electron-forge make"
+  },
+  "keywords": [
+    "electron",
+    "video-call",
+    "messaging",
+    "webrtc",
+    "appwrite"
+  ],
+  "author": "A&Y",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.6.0",
+    "@electron-forge/maker-dmg": "^7.6.0",
+    "@electron-forge/maker-zip": "^7.6.0",
+    "electron": "^33.0.0"
+  },
+  "dependencies": {
+    "appwrite": "^16.0.0",
+    "express": "^4.21.0",
+    "node-appwrite": "^22.1.2",
+    "simple-peer": "^9.11.1",
+    "socket.io": "^4.8.0",
+    "socket.io-client": "^4.8.0"
+  }
+}
