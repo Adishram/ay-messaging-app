@@ -401,23 +401,17 @@ function formatFileSize(bytes) {
 }
 
 async function uploadFile(file) {
-    // Workaround for Electron Chromium `Failed to fetch` bug with local files
-    // Convert the DOM File object into a pure in-memory File bypassing path restrictions
-    const buffer = await file.arrayBuffer();
-    const safeFile = new File([buffer], file.name, { type: file.type });
-
     const result = await storage.createFile(
         STORAGE_BUCKET_ID,
         Appwrite.ID.unique(),
-        safeFile
+        file
     );
     const fileUrl = storage.getFileView(STORAGE_BUCKET_ID, result.$id).toString();
     return {
-        fileId: result.$id,
         fileUrl,
         fileName: file.name,
         fileSize: file.size,
-        fileType: getFileType(file.type),
+        fileType: getFileType(file.type)
     };
 }
 
