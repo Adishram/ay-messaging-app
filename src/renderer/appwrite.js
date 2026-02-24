@@ -11,7 +11,7 @@ const COLLECTIONS = {
 };
 
 // Storage bucket ID for file uploads
-const STORAGE_BUCKET_ID = 'ay_files';
+const STORAGE_BUCKET_ID = '699b09b50039797d5b07';
 
 // File upload limits
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
