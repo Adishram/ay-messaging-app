@@ -82,6 +82,7 @@ async function ensureUserProfile(user) {
                 await databases.updateDocument(DATABASE_ID, COLLECTIONS.USERS, user.$id, {
                     publicKey: publicKeyB64,
                 });
+                existing.publicKey = publicKeyB64;
             } catch (e) {
                 console.warn('[Auth] Failed to sync new public key:', e);
             }
@@ -345,7 +346,7 @@ async function decryptMessageContent(msg, myUserId) {
         if (!sharedKey) return '[Encryption key unavailable]';
         return await Encryption.decryptMessage(sharedKey, msg.content);
     } catch (e) {
-        console.warn('Decryption failed:', e);
+        console.warn('Decryption failed, e:', e.message || e);
         return '[Could not decrypt message]';
     }
 }

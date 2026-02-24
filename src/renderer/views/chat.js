@@ -243,6 +243,7 @@ const ChatView = {
                             msg._decryptedContent = '[Encryption key unavailable]';
                         }
                     } catch (e) {
+                        console.error('Decryption failed for msg history:', e);
                         msg._decryptedContent = '[Could not decrypt]';
                     }
                 }
@@ -639,6 +640,7 @@ const ChatView = {
                                 payload._decryptedContent = '[Encryption key unavailable]';
                             }
                         } catch (e) {
+                            console.error('Decryption failed for realtime msg:', e);
                             payload._decryptedContent = '[Could not decrypt]';
                         }
                     }
