@@ -276,7 +276,7 @@ async function sendMessage(conversationId, senderId, content, type = 'text', fil
         fileSize,
         isEncrypted,
         createdAt: new Date().toISOString(),
-        readBy: [senderId],
+        readBy: senderId,
     };
 
     // Only include reply fields if they have values
@@ -355,24 +355,21 @@ async function markMessageRead(messageId, userId) {
         const msg = await databases.getDocument(DATABASE_ID, COLLECTIONS.MESSAGES, messageId);
         if (!msg) return;
 
-        let currentReaders = [];
-        if (Array.isArray(msg.readBy)) {
-            currentReaders = msg.readBy;
-        } else if (msg.readBy && typeof msg.readBy === 'string') {
-            // Assuming string format was 'id1,id2' or just 'id1'
-            currentReaders = msg.readBy.split(',').map(s => s.trim()).filter(Boolean);
-        }
+        const currentReaders = msg.readBy || '';
 
-        if (currentReaders.includes(userId)) return; // Use userId from parameter
+        // If it's already a string and includes the ID, done
+        if (typeof currentReaders === 'string') {
+            if (currentReaders.includes(userId)) return;
+            const updated = currentReaders ? `${currentReaders},${userId}` : userId;
 
-        const updated = [...currentReaders, userId]; // Use userId from parameter
-        if (App.socket && App.socket.connected) {
-            await databases.updateDocument(
-                DATABASE_ID,
-                COLLECTIONS.MESSAGES,
-                messageId,
-                { readBy: updated }
-            );
+            if (App.socket && App.socket.connected) {
+                await databases.updateDocument(
+                    DATABASE_ID,
+                    COLLECTIONS.MESSAGES,
+                    messageId,
+                    { readBy: updated }
+                );
+            }
         }
     } catch (e) {
         console.warn('markMessageRead error', e);
