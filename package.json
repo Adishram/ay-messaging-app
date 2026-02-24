@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "make": "electron-forge make",
-    "dist": "electron-builder --mac"
+    "dist": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
   },
   "build": {
     "appId": "com.adishram.aymessaging",
@@ -17,6 +18,15 @@
         "zip"
       ],
       "identity": null
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     }
   },
   "keywords": [

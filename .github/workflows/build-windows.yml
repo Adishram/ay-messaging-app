@@ -1,0 +1,38 @@
+name: Build Windows Application
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-windows.yml"
+
+jobs:
+  build:
+    name: Build Windows Executable (Native)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install App Dependencies
+        run: npm ci || npm install
+
+      - name: Execute Windows Cross-Compilation
+        # Run electron-builder native Windows x64 NSIS compiler
+        run: npm run dist:win -- --x64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: A&Y-Windows-Setup-Installer
+          path: dist/*.exe

@@ -115,7 +115,7 @@ const App = {
             console.warn('[Socket] Failed to create JWT, using fallback:', e.message);
         }
 
-        this.socket = io('http://localhost:3001', {
+        this.socket = io('https://ay-signaling.onrender.com', {
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,

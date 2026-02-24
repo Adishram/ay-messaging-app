@@ -1,9 +1,7 @@
 const { app, BrowserWindow, ipcMain, Notification, desktopCapturer, session, shell, safeStorage } = require('electron');
 const path = require('path');
-const { startSignalingServer } = require('./server/signaling');
 
 let mainWindow;
-let signalingServer;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -38,7 +36,7 @@ function createWindow() {
           " script-src 'self';" +
           " style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;" +
           " font-src https://fonts.gstatic.com;" +
-          " connect-src https://sgp.cloud.appwrite.io wss://sgp.cloud.appwrite.io ws://localhost:3001 http://localhost:3001;" +
+          " connect-src https://sgp.cloud.appwrite.io wss://sgp.cloud.appwrite.io https://ay-signaling.onrender.com wss://ay-signaling.onrender.com;" +
           " img-src 'self' https: data: blob:;" +
           " media-src 'self' blob:;"
         ],
@@ -118,17 +116,10 @@ app.whenReady().then(async () => {
     });
   });
 
-  // Start the signaling server
-  signalingServer = startSignalingServer(3001);
-  console.log('Signaling server started on port 3001');
-
   createWindow();
 });
 
 app.on('window-all-closed', () => {
-  if (signalingServer) {
-    signalingServer.close();
-  }
   app.quit();
 });
 
