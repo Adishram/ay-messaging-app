@@ -276,7 +276,7 @@ async function sendMessage(conversationId, senderId, content, type = 'text', fil
         fileSize,
         isEncrypted,
         createdAt: new Date().toISOString(),
-        readBy: senderId,
+        readBy: [senderId],
     };
 
     // Only include reply fields if they have values
@@ -352,14 +352,21 @@ async function decryptMessageContent(msg, myUserId) {
 
 async function markMessageRead(messageId, userId) {
     try {
-        const msg = await databases.getDocument(
-            DATABASE_ID,
-            COLLECTIONS.MESSAGES,
-            messageId
-        );
-        const currentReaders = msg.readBy || '';
-        if (!currentReaders.includes(userId)) {
-            const updated = currentReaders ? `${currentReaders},${userId}` : userId;
+        const msg = await databases.getDocument(DATABASE_ID, COLLECTIONS.MESSAGES, messageId);
+        if (!msg) return;
+
+        let currentReaders = [];
+        if (Array.isArray(msg.readBy)) {
+            currentReaders = msg.readBy;
+        } else if (msg.readBy && typeof msg.readBy === 'string') {
+            // Assuming string format was 'id1,id2' or just 'id1'
+            currentReaders = msg.readBy.split(',').map(s => s.trim()).filter(Boolean);
+        }
+
+        if (currentReaders.includes(userId)) return; // Use userId from parameter
+
+        const updated = [...currentReaders, userId]; // Use userId from parameter
+        if (App.socket && App.socket.connected) {
             await databases.updateDocument(
                 DATABASE_ID,
                 COLLECTIONS.MESSAGES,
@@ -397,10 +404,15 @@ function formatFileSize(bytes) {
 }
 
 async function uploadFile(file) {
+    // Workaround for Electron Chromium `Failed to fetch` bug with local files
+    // Convert the DOM File object into a pure in-memory File bypassing path restrictions
+    const buffer = await file.arrayBuffer();
+    const safeFile = new File([buffer], file.name, { type: file.type });
+
     const result = await storage.createFile(
         STORAGE_BUCKET_ID,
         Appwrite.ID.unique(),
-        file
+        safeFile
     );
     const fileUrl = storage.getFileView(STORAGE_BUCKET_ID, result.$id).toString();
     return {
