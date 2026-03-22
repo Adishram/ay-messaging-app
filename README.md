@@ -78,13 +78,13 @@ To compile the application into native executables for your operating system:
 
 **For macOS:**
 ```bash
-npm run build:mac
+npm run dist
 ```
 *(Note: Building for both Apple Silicon and Intel is supported with `electron-builder`.)*
 
 **For Windows:**
 ```bash
-npm run build:win
+npm run dist:win
 ```
 
 ## 🐛 Issues & Feature Requests
