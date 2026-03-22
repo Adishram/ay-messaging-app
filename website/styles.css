@@ -107,6 +107,9 @@ body {
 }
 
 .hero-actions {
+    display: flex;
+    gap: 16px;
+    align-items: center;
     margin-bottom: 16px;
 }
 
@@ -126,6 +129,27 @@ body {
 
 .btn-primary:hover {
     background-color: var(--accent-hover);
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background-color: transparent;
+    border: 2px solid var(--accent-solid);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 16px;
+    padding: 14px 30px;
+    /* slightly smaller padding to account for border */
+    border-radius: 100px;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+    background-color: var(--accent-light);
     transform: translateY(-2px);
 }
 

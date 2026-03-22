@@ -1,92 +1,53 @@
 // ── End-to-End Encryption Module ──────────────────────────────────
-// Uses the Web Crypto API (SubtleCrypto) built into Chromium/Electron.
-// AES-256-GCM for message encryption, PBKDF2 for key derivation,
-// ECDH (P-256) for key exchange between conversation participants.
+// Uses Web Crypto API: ECDH (P-256) for key exchange, AES-256-GCM for message encryption.
+// Adapted for P2P identity (hex-encoded keys from identity.js).
 
 const Encryption = {
-    // ── Key Pair Management ─────────────────────────────────────────
+    _sharedKeyCache: new Map(),
+
+    // ── Derive shared AES-256-GCM key from ECDH ────────────────────────
 
     /**
-     * Generate an ECDH key pair for the current user.
-     * The public key is shared via the Appwrite users collection.
-     * The private key stays in localStorage (never leaves the device).
+     * Derive a shared key for a specific peer.
+     * Uses the local private key (base64 PKCS8) and remote public key (hex raw).
+     * Results are cached per remotePubKeyHex.
      */
-    async generateKeyPair() {
-        const keyPair = await crypto.subtle.generateKey(
+    async deriveSharedKeyFor(privKeyB64, remotePubKeyHex) {
+        if (this._sharedKeyCache.has(remotePubKeyHex)) {
+            return this._sharedKeyCache.get(remotePubKeyHex);
+        }
+
+        const remotePubKeyBuf = hexToBuf(remotePubKeyHex);
+        const remotePubKey = await crypto.subtle.importKey(
+            'raw', remotePubKeyBuf,
             { name: 'ECDH', namedCurve: 'P-256' },
-            true, // extractable
-            ['deriveKey', 'deriveBits']
+            false, []
         );
-        return keyPair;
-    },
 
-    /**
-     * Export a public key to base64 (to store in Appwrite).
-     */
-    async exportPublicKey(publicKey) {
-        const raw = await crypto.subtle.exportKey('raw', publicKey);
-        return this._arrayBufferToBase64(raw);
-    },
-
-    /**
-     * Import a public key from base64 (from Appwrite).
-     */
-    async importPublicKey(base64Key) {
-        const raw = this._base64ToArrayBuffer(base64Key);
-        return await crypto.subtle.importKey(
-            'raw',
-            raw,
+        const myPrivKeyBuf = base64ToBuf(privKeyB64);
+        const myPrivKey = await crypto.subtle.importKey(
+            'pkcs8', myPrivKeyBuf,
             { name: 'ECDH', namedCurve: 'P-256' },
-            true,
-            []
+            false, ['deriveKey', 'deriveBits']
         );
-    },
 
-    /**
-     * Export a private key to JWK for secure local storage.
-     */
-    async exportPrivateKey(privateKey) {
-        return await crypto.subtle.exportKey('jwk', privateKey);
-    },
-
-    /**
-     * Import a private key from JWK.
-     */
-    async importPrivateKey(jwk) {
-        return await crypto.subtle.importKey(
-            'jwk',
-            jwk,
-            { name: 'ECDH', namedCurve: 'P-256' },
-            true,
-            ['deriveKey', 'deriveBits']
-        );
-    },
-
-    // ── Shared Secret Derivation ────────────────────────────────────
-
-    /**
-     * Derive a shared AES-256-GCM key from your private key + their public key.
-     * This is the magic of ECDH: both sides derive the same shared secret
-     * without ever transmitting it.
-     */
-    async deriveSharedKey(myPrivateKey, theirPublicKey) {
-        return await crypto.subtle.deriveKey(
-            {
-                name: 'ECDH',
-                public: theirPublicKey,
-            },
-            myPrivateKey,
+        const sharedKey = await crypto.subtle.deriveKey(
+            { name: 'ECDH', public: remotePubKey },
+            myPrivKey,
             { name: 'AES-GCM', length: 256 },
             false,
             ['encrypt', 'decrypt']
         );
+
+        this._sharedKeyCache.set(remotePubKeyHex, sharedKey);
+        return sharedKey;
     },
 
-    // ── Message Encryption / Decryption ─────────────────────────────
+    // ── Message Encryption / Decryption ─────────────────────────────────
 
     /**
      * Encrypt a plaintext message using AES-256-GCM.
-     * Returns a base64 string containing iv + ciphertext.
+     * Returns { ciphertext (base64), iv (base64) } as separate fields.
      */
     async encryptMessage(sharedKey, plaintext) {
         const encoder = new TextEncoder();
@@ -101,24 +62,19 @@ const Encryption = {
             data
         );
 
-        // Pack iv + ciphertext together
-        const packed = new Uint8Array(iv.length + ciphertext.byteLength);
-        packed.set(iv, 0);
-        packed.set(new Uint8Array(ciphertext), iv.length);
-
-        return this._arrayBufferToBase64(packed.buffer);
+        return {
+            ciphertext: this._arrayBufferToBase64(ciphertext),
+            iv: this._arrayBufferToBase64(iv.buffer),
+        };
     },
 
     /**
      * Decrypt an encrypted message using AES-256-GCM.
-     * Input is the base64 string from encryptMessage().
+     * Input: ciphertext (base64), iv (base64).
      */
-    async decryptMessage(sharedKey, encryptedBase64) {
-        const packed = new Uint8Array(this._base64ToArrayBuffer(encryptedBase64));
-
-        // Extract iv (first 12 bytes) and ciphertext (rest)
-        const iv = packed.slice(0, 12);
-        const ciphertext = packed.slice(12);
+    async decryptMessage(sharedKey, ciphertextB64, ivB64) {
+        const ciphertext = this._base64ToArrayBuffer(ciphertextB64);
+        const iv = new Uint8Array(this._base64ToArrayBuffer(ivB64));
 
         const decrypted = await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv },
@@ -126,112 +82,14 @@ const Encryption = {
             ciphertext
         );
 
-        const decoder = new TextDecoder();
-        return decoder.decode(decrypted);
-    },
-
-    /**
-     * Save the user's key pair to localStorage.
-     * Private key is encrypted via OS keychain (safeStorage) before storage (P2 #8).
-     */
-    async saveKeyPairLocally(userId, keyPair) {
-        const publicKeyB64 = await this.exportPublicKey(keyPair.publicKey);
-        const privateKeyJwk = await this.exportPrivateKey(keyPair.privateKey);
-        const privateKeyStr = JSON.stringify(privateKeyJwk);
-
-        localStorage.setItem(`ay_pubkey_${userId}`, publicKeyB64);
-
-        // Encrypt private key with OS keychain if available
-        if (window.electronAPI && window.electronAPI.safeStorageEncrypt) {
-            try {
-                const encrypted = await window.electronAPI.safeStorageEncrypt(privateKeyStr);
-                if (encrypted) {
-                    localStorage.setItem(`ay_privkey_${userId}`, 'encrypted:' + encrypted);
-                    return;
-                }
-            } catch (e) {
-                console.warn('safeStorage encrypt failed, falling back to plain:', e);
-            }
-        }
-        // Fallback: store as plain JSON
-        localStorage.setItem(`ay_privkey_${userId}`, privateKeyStr);
-    },
-
-    /**
-     * Load the user's key pair from localStorage.
-     * Decrypts private key via safeStorage if it was encrypted.
-     */
-    async loadKeyPairLocally(userId) {
-        const publicKeyB64 = localStorage.getItem(`ay_pubkey_${userId}`);
-        const privateKeyRaw = localStorage.getItem(`ay_privkey_${userId}`);
-
-        if (!publicKeyB64 || !privateKeyRaw) return null;
-
-        try {
-            let privateKeyStr = privateKeyRaw;
-
-            // Decrypt if encrypted with safeStorage
-            if (privateKeyRaw.startsWith('encrypted:')) {
-                if (window.electronAPI && window.electronAPI.safeStorageDecrypt) {
-                    const decrypted = await window.electronAPI.safeStorageDecrypt(
-                        privateKeyRaw.substring('encrypted:'.length)
-                    );
-                    if (decrypted) {
-                        privateKeyStr = decrypted;
-                    } else {
-                        console.warn('safeStorage decrypt returned null');
-                        return null;
-                    }
-                } else {
-                    console.warn('Private key is encrypted but safeStorage unavailable');
-                    return null;
-                }
-            }
-
-            const publicKey = await this.importPublicKey(publicKeyB64);
-            const privateKey = await this.importPrivateKey(JSON.parse(privateKeyStr));
-            return { publicKey, privateKey };
-        } catch (e) {
-            console.error('Failed to load keys:', e);
-            return null;
-        }
-    },
-
-    /**
-     * Get or create the user's key pair.
-     * If keys exist in localStorage, load them.
-     * Otherwise, generate new ones and save.
-     */
-    async getOrCreateKeyPair(userId) {
-        let keyPair = await this.loadKeyPairLocally(userId);
-        if (keyPair) return keyPair;
-
-        keyPair = await this.generateKeyPair();
-        await this.saveKeyPairLocally(userId, keyPair);
-        return keyPair;
-    },
-
-    // ── Shared Key Cache ────────────────────────────────────────────
-    // Cache derived shared keys per peer to avoid re-deriving on every message.
-
-    _sharedKeyCache: new Map(),
-
-    async getSharedKey(myPrivateKey, theirPublicKeyBase64) {
-        if (this._sharedKeyCache.has(theirPublicKeyBase64)) {
-            return this._sharedKeyCache.get(theirPublicKeyBase64);
-        }
-
-        const theirPublicKey = await this.importPublicKey(theirPublicKeyBase64);
-        const sharedKey = await this.deriveSharedKey(myPrivateKey, theirPublicKey);
-        this._sharedKeyCache.set(theirPublicKeyBase64, sharedKey);
-        return sharedKey;
+        return new TextDecoder().decode(decrypted);
     },
 
     clearCache() {
         this._sharedKeyCache.clear();
     },
 
-    // ── Utility ─────────────────────────────────────────────────────
+    // ── Utility ─────────────────────────────────────────────────────────
 
     _arrayBufferToBase64(buffer) {
         const bytes = new Uint8Array(buffer);

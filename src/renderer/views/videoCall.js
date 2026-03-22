@@ -60,6 +60,13 @@ const VideoCallView = {
             App.showView('main');
         });
 
+        // Handle Trickle ICE Candidates
+        App.socket.on('ice-candidate', ({ from, candidate }) => {
+            if (this.peer && this.currentCallPeerId === from && !this.peer.destroyed) {
+                this.peer.signal(candidate);
+            }
+        });
+
         App.socket.on('call-error', ({ message }) => {
             document.getElementById('call-status').textContent = message;
             setTimeout(() => this.endCall(), 2000);
@@ -100,22 +107,28 @@ const VideoCallView = {
             this.peer = new SimplePeer({
                 initiator: true,
                 stream: this.localStream,
-                trickle: false,
+                trickle: true, // Enable Trickle ICE for much faster/reliable connections
                 config: {
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:global.stun.twilio.com:3478' }
                     ],
                 },
             });
 
             this.peer.on('signal', (data) => {
-                console.log('[VideoCall] Sending offer to', peerId);
-                App.socket.emit('call-user', {
-                    to: peerId,
-                    offer: data,
-                    callerName: App.currentUser.name,
-                });
+                if (data.type === 'offer') {
+                    console.log('[VideoCall] Sending offer to', peerId);
+                    App.socket.emit('call-user', {
+                        to: peerId,
+                        offer: data,
+                        callerName: App.currentUser.profile.name, // Fixed bug: was App.currentUser.name
+                    });
+                } else if (data.candidate) {
+                    // Send ICE candidates individually as they are gathered
+                    App.socket.emit('ice-candidate', { to: peerId, candidate: data });
+                }
             });
 
             this.peer.on('stream', (remoteStream) => {
@@ -179,18 +192,23 @@ const VideoCallView = {
             this.peer = new SimplePeer({
                 initiator: false,
                 stream: this.localStream,
-                trickle: false,
+                trickle: true,
                 config: {
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:global.stun.twilio.com:3478' }
                     ],
                 },
             });
 
             this.peer.on('signal', (data) => {
-                console.log('[VideoCall] Sending answer to', from);
-                App.socket.emit('call-accepted', { to: from, answer: data });
+                if (data.type === 'answer') {
+                    console.log('[VideoCall] Sending answer to', from);
+                    App.socket.emit('call-accepted', { to: from, answer: data });
+                } else if (data.candidate) {
+                    App.socket.emit('ice-candidate', { to: from, candidate: data });
+                }
             });
 
             this.peer.on('stream', (remoteStream) => {
@@ -253,6 +271,9 @@ const VideoCallView = {
                         mandatory: {
                             chromeMediaSource: 'desktop',
                             chromeMediaSourceId: selectedSource.id,
+                            maxWidth: 1920,
+                            maxHeight: 1080,
+                            maxFrameRate: 30
                         },
                     },
                 });

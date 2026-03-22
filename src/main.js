@@ -36,7 +36,7 @@ function createWindow() {
           " script-src 'self';" +
           " style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;" +
           " font-src https://fonts.gstatic.com;" +
-          " connect-src https://sgp.cloud.appwrite.io wss://sgp.cloud.appwrite.io https://ay-signaling.onrender.com wss://ay-signaling.onrender.com;" +
+          " connect-src * data: blob: 'unsafe-inline';" +
           " img-src 'self' https: data: blob:;" +
           " media-src 'self' blob:;"
         ],
@@ -167,20 +167,4 @@ ipcMain.handle('open-external', (event, url) => {
   } catch (e) {
     console.warn('[Security] Blocked openExternal for invalid URL:', url);
   }
-});
-
-// Secure key storage (P2 #8)
-ipcMain.handle('safe-storage-encrypt', (event, plaintext) => {
-  if (safeStorage.isEncryptionAvailable()) {
-    return safeStorage.encryptString(plaintext).toString('base64');
-  }
-  return null;
-});
-
-ipcMain.handle('safe-storage-decrypt', (event, encrypted) => {
-  if (safeStorage.isEncryptionAvailable()) {
-    const buffer = Buffer.from(encrypted, 'base64');
-    return safeStorage.decryptString(buffer);
-  }
-  return null;
 });

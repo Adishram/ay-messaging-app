@@ -1,213 +1,231 @@
-// ── Contacts View Controller ──────────────────────────────────────
+// contacts.js — Manage Contacts and Conversations locally
+
 const ContactsView = {
+    conversations: [],
     contacts: [],
-    onlineUsers: [],
 
     init() {
-        // Sidebar tab switching
-        document.querySelectorAll('.sidebar-tab').forEach((tab) => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.sidebar-tab').forEach((t) => t.classList.remove('active'));
-                tab.classList.add('active');
-                document.querySelectorAll('.sidebar-panel').forEach((p) => p.classList.remove('active'));
-                document.getElementById(`panel-${tab.dataset.panel}`).classList.add('active');
+        // Tab switching
+        document.querySelectorAll('.sidebar-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+                
+                e.target.classList.add('active');
+                const panelId = `panel-${e.target.dataset.panel}`;
+                document.getElementById(panelId).classList.add('active');
             });
-        });
-
-        // Add contact modal
-        document.getElementById('btn-add-contact').addEventListener('click', () => {
-            document.getElementById('modal-add-contact').classList.remove('hidden');
-            document.getElementById('add-contact-email').focus();
-        });
-
-        document.getElementById('btn-cancel-add-contact').addEventListener('click', () => {
-            document.getElementById('modal-add-contact').classList.add('hidden');
-            document.getElementById('add-contact-email').value = '';
-            document.getElementById('add-contact-error').textContent = '';
-        });
-
-        document.getElementById('btn-confirm-add-contact').addEventListener('click', async () => {
-            const email = document.getElementById('add-contact-email').value.trim();
-            const errorEl = document.getElementById('add-contact-error');
-            errorEl.textContent = '';
-
-            if (!email) {
-                errorEl.textContent = 'Please enter an email address.';
-                return;
-            }
-
-            try {
-                const user = await searchUserByEmail(email);
-                if (!user) {
-                    errorEl.textContent = 'No user found with that email.';
-                    return;
-                }
-                if (user.userId === App.currentUser.$id) {
-                    errorEl.textContent = "You can't add yourself!";
-                    return;
-                }
-
-                // Create or get conversation
-                await getOrCreateConversation(App.currentUser.$id, user.userId);
-                document.getElementById('modal-add-contact').classList.add('hidden');
-                document.getElementById('add-contact-email').value = '';
-
-                // Refresh conversations
-                await ContactsView.loadConversations();
-
-                // Switch to conversations tab
-                document.querySelector('.sidebar-tab[data-panel="conversations"]').click();
-            } catch (err) {
-                errorEl.textContent = err.message || 'Failed to add contact.';
-            }
         });
 
         // Search
         document.getElementById('search-contacts').addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            document.querySelectorAll('.contact-item').forEach((item) => {
-                const name = item.querySelector('.contact-name')?.textContent.toLowerCase() || '';
-                item.style.display = name.includes(query) ? '' : 'none';
-            });
+            this.handleSearch(e.target.value);
         });
 
-        // Logout
-        document.getElementById('btn-logout').addEventListener('click', async () => {
-            try {
-                // Set status to offline before logging out
-                if (App.currentUser) {
-                    try {
-                        await databases.updateDocument(
-                            DATABASE_ID, COLLECTIONS.USERS, App.currentUser.$id,
-                            { lastSeen: 'offline' }
-                        );
-                    } catch (_) { }
-                }
-                // Clean up all live resources (P2 #5)
-                App.teardown();
-                await logout();
-                App.showView('auth');
-            } catch (err) {
-                console.error('Logout error:', err);
-            }
+        // Add Contact Modal
+        document.getElementById('btn-add-contact').addEventListener('click', () => {
+            document.getElementById('modal-add-contact').classList.remove('hidden');
+            setTimeout(() => document.getElementById('add-contact-string').focus(), 100);
+        });
+
+        document.getElementById('btn-cancel-add-contact').addEventListener('click', () => {
+            document.getElementById('modal-add-contact').classList.add('hidden');
+            document.getElementById('add-contact-string').value = '';
+            document.getElementById('add-contact-error').textContent = '';
+        });
+
+        document.getElementById('btn-confirm-add-contact').addEventListener('click', () => this.addContact());
+        
+        // Handle enter key in add contact
+        document.getElementById('add-contact-string').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.addContact();
         });
     },
 
     async loadConversations() {
-        if (!App.currentUser) return;
+        try {
+            this.conversations = await getConversationsLocal();
+            this.renderConversations();
+        } catch (error) {
+            console.error('Failed to load conversations:', error);
+        }
+    },
 
-        const conversations = await getConversations(App.currentUser.$id);
+    async loadContacts() {
+        try {
+            this.contacts = await getAllContacts();
+            this.renderContacts();
+        } catch (error) {
+            console.error('Failed to load contacts:', error);
+        }
+    },
+
+    async addContact() {
+        const inputString = document.getElementById('add-contact-string').value.trim();
+        const errorEl = document.getElementById('add-contact-error');
+        const btn = document.getElementById('btn-confirm-add-contact');
+        
+        if (!inputString) return;
+
+        btn.innerHTML = '<span>Connecting...</span>';
+        btn.disabled = true;
+        errorEl.textContent = '';
+
+        try {
+            // Initiate P2P connection to exchange profiles
+            const pubKeyHex = await P2P.connectFromString(inputString);
+            
+            // Wait shortly for profile exchange if online
+            await new Promise(res => setTimeout(res, 2000));
+            
+            // Check if contact was added (P2P layer upserts it when profile received)
+            let contact = await getContact(pubKeyHex);
+            
+            if (!contact) {
+                // Not online immediately, add placeholder
+                contact = {
+                    pubKeyHex,
+                    profile: { name: 'Unknown User', avatarColor: '#9e9e9e' }
+                };
+                await upsertContact(contact);
+            }
+
+            // Create a conversation implicitly
+            const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, pubKeyHex);
+
+            document.getElementById('modal-add-contact').classList.add('hidden');
+            document.getElementById('add-contact-string').value = '';
+            
+            // Reload views
+            await this.loadContacts();
+            await this.loadConversations();
+            
+            // Switch to chats tab
+            document.querySelector('[data-panel="conversations"]').click();
+            ChatView.openConversation(conv, contact);
+
+        } catch (error) {
+            console.error('Add contact failed:', error);
+            errorEl.textContent = 'Invalid connection string or connection failed.';
+        } finally {
+            btn.innerHTML = '<span>Connect</span>';
+            btn.disabled = false;
+        }
+    },
+
+    renderConversations(filterText = '') {
         const listEl = document.getElementById('conversation-list');
         listEl.innerHTML = '';
 
-        for (const conv of conversations) {
-            const otherUserId = conv.participants.find((p) => p !== App.currentUser.$id);
-            const profile = await getUserProfile(otherUserId);
-            if (!profile) continue;
+        // Hydrate conversations with contact profiles
+        const hydrated = this.conversations.map(conv => {
+            const contact = this.contacts.find(c => c.pubKeyHex === conv.peerPubKeyHex) || 
+                          { profile: { name: 'Unknown', avatarColor: '#9e9e9e' }};
+            return { ...conv, peerProfile: contact.profile };
+        });
 
-            const initials = this.getInitials(profile.name);
-            const isOnline = this.onlineUsers.includes(otherUserId);
-            const time = conv.$updatedAt ? this.formatTime(conv.$updatedAt) : '';
-            const draft = localStorage.getItem(`draft_${conv.$id}`) || '';
+        const filtered = hydrated.filter(conv => 
+            conv.peerProfile.name.toLowerCase().includes(filterText.toLowerCase())
+        );
+
+        if (filtered.length === 0) {
+            listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 13px;">No chats found</div>';
+            return;
+        }
+
+        filtered.forEach(conv => {
+            const isOnline = App.onlineUsers.has(conv.peerPubKeyHex);
+            const initials = this.getInitials(conv.peerProfile.name);
+            const timeStr = conv.lastMessageAt ? new Date(conv.lastMessageAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '';
+            const previewText = conv.lastMessagePreview || 'Started a conversation';
+            const isActive = ChatView.currentConversation?.id === conv.id;
 
             const item = document.createElement('div');
-            item.className = 'contact-item';
-            item.dataset.conversationId = conv.$id;
-            item.dataset.userId = otherUserId;
+            item.className = `contact-item ${isActive ? 'active' : ''}`;
+            item.onclick = () => ChatView.openConversation(
+                this.conversations.find(c => c.id === conv.id), 
+                this.contacts.find(c => c.pubKeyHex === conv.peerPubKeyHex)
+            );
+
             item.innerHTML = `
-        <div class="contact-avatar">
-          ${initials}
-          ${isOnline ? '<div class="online-badge"></div>' : ''}
-        </div>
-        <div class="contact-info">
-          <div class="contact-name">${this.escapeHtml(profile.name)}</div>
-          <div class="contact-preview">${draft ? '<span class="draft-label">Draft:</span> ' + this.escapeHtml(draft) : this.escapeHtml(conv.lastMessage || 'No messages yet')}</div>
-        </div>
-        <div class="contact-meta">
-          <span class="contact-time">${time}</span>
-        </div>
-      `;
-
-            item.addEventListener('click', () => {
-                document.querySelectorAll('.contact-item').forEach((ci) => ci.classList.remove('active'));
-                item.classList.add('active');
-                ChatView.openConversation(conv.$id, otherUserId, profile.name, isOnline);
-            });
-
+                <div class="contact-avatar" style="background-color: ${conv.peerProfile.avatarColor}">
+                    ${initials}
+                    <div class="status-indicator ${isOnline ? 'online' : 'offline'}"></div>
+                </div>
+                <div class="contact-info">
+                    <div class="contact-header">
+                        <span class="contact-name">${this.escapeHtml(conv.peerProfile.name)}</span>
+                        <span class="contact-time">${timeStr}</span>
+                    </div>
+                    <span class="contact-preview">${this.escapeHtml(previewText)}</span>
+                </div>
+            `;
             listEl.appendChild(item);
-        }
-    },
-
-    updateOnlineUsers(users) {
-        this.onlineUsers = users;
-        // Re-render online badges
-        document.querySelectorAll('.contact-item').forEach((item) => {
-            const userId = item.dataset.userId;
-            const badge = item.querySelector('.online-badge');
-            if (users.includes(userId)) {
-                if (!badge) {
-                    const avatar = item.querySelector('.contact-avatar');
-                    const badgeEl = document.createElement('div');
-                    badgeEl.className = 'online-badge';
-                    avatar.appendChild(badgeEl);
-                }
-            } else {
-                if (badge) badge.remove();
-            }
         });
     },
 
-    getInitials(name) {
-        return name
-            .split(' ')
-            .map((w) => w[0])
-            .join('')
-            .substring(0, 2)
-            .toUpperCase();
+    renderContacts(filterText = '') {
+        const listEl = document.getElementById('contact-list');
+        listEl.innerHTML = '';
+
+        const filtered = this.contacts.filter(contact => 
+            contact.profile.name.toLowerCase().includes(filterText.toLowerCase())
+        );
+
+        if (filtered.length === 0) {
+            listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 13px;">No contacts found</div>';
+            return;
+        }
+
+        filtered.forEach(contact => {
+            const isOnline = App.onlineUsers.has(contact.pubKeyHex);
+            const initials = this.getInitials(contact.profile.name);
+
+            const item = document.createElement('div');
+            item.className = `contact-item`;
+            item.onclick = async () => {
+                const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, contact.pubKeyHex);
+                document.querySelector('[data-panel="conversations"]').click();
+                ChatView.openConversation(conv, contact);
+            };
+
+            item.innerHTML = `
+                <div class="contact-avatar" style="background-color: ${contact.profile.avatarColor}">
+                    ${initials}
+                    <div class="status-indicator ${isOnline ? 'online' : 'offline'}"></div>
+                </div>
+                <div class="contact-info" style="justify-content: center">
+                    <span class="contact-name">${this.escapeHtml(contact.profile.name)}</span>
+                </div>
+            `;
+            listEl.appendChild(item);
+        });
     },
 
-    formatTime(isoString) {
-        const date = new Date(isoString);
-        const now = new Date();
-        const diffMs = now - date;
-        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-        if (diffDays === 0) {
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } else if (diffDays === 1) {
-            return 'Yesterday';
-        } else if (diffDays < 7) {
-            return date.toLocaleDateString([], { weekday: 'short' });
+    handleSearch(text) {
+        const isChatsTab = document.querySelector('[data-panel="conversations"]').classList.contains('active');
+        if (isChatsTab) {
+            this.renderConversations(text);
         } else {
-            return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            this.renderContacts(text);
         }
     },
 
+    updateOnlineStatuses() {
+        // Just re-render the current lists to update the green dots
+        this.renderConversations(document.getElementById('search-contacts').value);
+        this.renderContacts(document.getElementById('search-contacts').value);
+    },
+
+    getInitials(name) {
+        if (!name) return '?';
+        return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+    },
+
     escapeHtml(str) {
+        if (!str) return '';
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
-    },
-
-    // (2.6) Format "last seen X ago" relative time
-    formatRelativeTime(isoString) {
-        if (!isoString || isoString === 'online') return 'Online';
-        if (isoString === 'offline') return 'Offline';
-
-        const date = new Date(isoString);
-        if (isNaN(date.getTime())) return 'Offline';
-
-        const now = new Date();
-        const diffMs = now - date;
-        const diffSec = Math.floor(diffMs / 1000);
-        const diffMin = Math.floor(diffSec / 60);
-        const diffHr = Math.floor(diffMin / 60);
-        const diffDay = Math.floor(diffHr / 24);
-
-        if (diffMin < 1) return 'last seen just now';
-        if (diffMin < 60) return `last seen ${diffMin}m ago`;
-        if (diffHr < 24) return `last seen ${diffHr}h ago`;
-        if (diffDay < 7) return `last seen ${diffDay}d ago`;
-        return `last seen ${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
-    },
+    }
 };
