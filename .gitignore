@@ -5,3 +5,14 @@ build/
 .DS_Store
 *.log
 A&Y.dmg
+ay-website/
+ay-signaling/
+website/
+test-data-1/
+test-data-2/
+win-artifact/
+build-win.zip
+A&Y-Windows.exe
+electron-*.zip
+publish.sh
+rcedit-test.exe

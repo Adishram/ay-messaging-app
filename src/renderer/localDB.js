@@ -122,9 +122,14 @@ async function getMessagesLocal(conversationId, limit = 100) {
     const index = tx.objectStore('messages').index('by_conv');
     const range = IDBKeyRange.only(conversationId);
     const msgs  = [];
-    index.openCursor(range, 'prev').onsuccess = e => {
+    index.openCursor(range).onsuccess = e => {
       const cursor = e.target.result;
-      if (!cursor || msgs.length >= limit) { resolve(msgs.reverse()); return; }
+      if (!cursor) {
+        // Sort by timestamp ascending (oldest first) then take last N
+        msgs.sort((a, b) => a.timestamp - b.timestamp);
+        resolve(msgs.slice(-limit));
+        return;
+      }
       msgs.push(cursor.value);
       cursor.continue();
     };

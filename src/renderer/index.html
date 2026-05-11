@@ -4,12 +4,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>A&Y — Video Call & Messaging</title>
+  <title>A&Y — Serverless P2P Messaging</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <!-- Bundled dependencies -->
-  <script src="vendor/socket.io.min.js"></script>
+  <!-- SimplePeer for video calls only -->
   <script src="vendor/simplepeer.min.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -20,7 +19,7 @@
 
   <!-- App container -->
   <div id="app">
-    <!-- Auth View (Setup Identity) -->
+    <!-- Auth View (Create / Restore) -->
     <div id="view-auth" class="view active">
       <div class="auth-container">
         <div class="auth-logo">
@@ -36,21 +35,64 @@
         </div>
 
         <div class="auth-card glass-card">
-          <h2 style="margin-bottom: 24px; text-align: center; color: white;">Welcome</h2>
-          <!-- Setup Form -->
-          <form id="form-setup" class="auth-form">
-            <div class="input-group">
-              <label for="setup-name">Display Name</label>
-              <input type="text" id="setup-name" placeholder="Your name" required />
+          <!-- Tab switcher -->
+          <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="create">Create Account</button>
+            <button class="auth-tab" data-tab="restore">Restore Account</button>
+          </div>
+
+          <!-- Create Account Panel -->
+          <div id="auth-create-panel">
+            <form id="form-create" class="auth-form">
+              <div class="input-group">
+                <label for="create-name">Display Name</label>
+                <input type="text" id="create-name" placeholder="Your name" required />
+              </div>
+              <button type="submit" class="btn-primary" id="btn-create" style="margin-top: 16px;">
+                <span>Create Account</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              </button>
+              <p id="create-error" class="auth-error"></p>
+            </form>
+          </div>
+
+          <!-- Restore Account Panel -->
+          <div id="auth-restore-panel" class="hidden">
+            <form id="form-restore" class="auth-form">
+              <div class="input-group">
+                <label for="restore-words">Recovery Phrase (8 words)</label>
+                <textarea id="restore-words" rows="3" placeholder="Enter your 8 recovery words separated by spaces..." required></textarea>
+              </div>
+              <div class="input-group">
+                <label for="restore-name">Display Name</label>
+                <input type="text" id="restore-name" placeholder="Your name" required />
+              </div>
+              <button type="submit" class="btn-primary" id="btn-restore" style="margin-top: 16px;">
+                <span>Restore Account</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              </button>
+              <p id="restore-error" class="auth-error"></p>
+            </form>
+          </div>
+
+          <!-- Mnemonic Display Step (shown after create) -->
+          <div id="mnemonic-step" class="hidden">
+            <h3 style="color: white; text-align: center; margin-bottom: 8px;">Your Recovery Phrase</h3>
+            <p style="color: rgba(255,255,255,0.6); text-align: center; font-size: 13px; margin-bottom: 16px;">
+              Write these words down and keep them safe. They are the ONLY way to recover your account.
+            </p>
+            <div id="mnemonic-display" class="mnemonic-grid"></div>
+            <div style="display: flex; gap: 8px; margin-top: 16px;">
+              <button class="btn-secondary" id="btn-copy-mnemonic" style="flex: 1;">Copy Words</button>
+              <button class="btn-primary" id="btn-confirm-mnemonic" style="flex: 1;">
+                <span>I've Saved Them</span>
+              </button>
             </div>
-            <button type="submit" class="btn-primary" style="margin-top: 16px;">
-              <span>Continue</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M5 12h14M12 5l7 7-7 7" />
-              </svg>
-            </button>
-            <p id="setup-error" class="auth-error"></p>
-          </form>
+          </div>
         </div>
       </div>
     </div>
@@ -297,9 +339,10 @@
     <div class="modal-overlay hidden" id="modal-add-contact">
       <div class="modal glass-card">
         <h3>Add Contact</h3>
-        <p>Paste your friend's connection string to add them.</p>
+        <p>Paste your friend's User ID to connect.</p>
         <div class="input-group">
-          <input type="text" id="add-contact-string" placeholder="ay://add/..." style="font-family: monospace;" />
+          <label for="add-contact-id">User ID (64-char hex)</label>
+          <input type="text" id="add-contact-id" placeholder="e.g. 7f4e2k9m3x5p8q1r..." style="font-family: monospace;" />
         </div>
         <p id="add-contact-error" class="auth-error"></p>
         <div class="modal-actions">
@@ -324,15 +367,23 @@
         </div>
 
         <div class="settings-body">
-          <!-- Connection String -->
+          <!-- User ID -->
           <div class="settings-section">
-            <h3>My Connection String</h3>
+            <h3>Your User ID</h3>
             <p>Share this with friends so they can add you.</p>
             <div class="settings-row" style="margin-top: 8px;">
-              <input type="text" id="settings-conn-string" class="settings-input" readonly style="font-family: monospace; font-size: 13px; color: #a1a1aa;" />
-              <button class="btn-secondary settings-btn" id="btn-copy-conn">Copy</button>
+              <input type="text" id="settings-userid" class="settings-input" readonly style="font-family: monospace; font-size: 12px; color: #a1a1aa;" />
+              <button class="btn-secondary settings-btn" id="btn-copy-userid">Copy</button>
             </div>
-            <p id="conn-status" class="settings-status"></p>
+            <p id="userid-status" class="settings-status"></p>
+          </div>
+
+          <!-- Recovery Phrase -->
+          <div class="settings-section">
+            <h3>Recovery Phrase</h3>
+            <p>These 8 words are the only way to recover your account. Keep them safe.</p>
+            <div id="settings-mnemonic" class="mnemonic-grid hidden" style="margin-top: 8px;"></div>
+            <button class="btn-secondary" id="btn-reveal-mnemonic" style="margin-top: 8px;">Reveal</button>
           </div>
 
           <!-- Display Name -->
@@ -358,6 +409,7 @@
   </div>
 
   <!-- Load scripts -->
+  <script src="wordlist.js"></script>
   <script src="identity.js"></script>
   <script src="localDB.js"></script>
   <script src="encryption.js"></script>

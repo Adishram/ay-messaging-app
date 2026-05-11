@@ -2,9 +2,8 @@
 
 const App = {
     currentUser: null,
-    socket: null, // Points to P2P.getSocket() (the signaling socket)
     currentView: 'auth',
-    onlineUsers: new Set(), // Set of pubKeyHex
+    onlineUsers: new Set(),
 
     async init() {
         console.log('App init...');
@@ -18,22 +17,20 @@ const App = {
         this.setupEventListeners();
 
         try {
-            // Check identity, if name is Anonymous, show auth setup view
+            // Try to load existing identity
             const identity = await P2P.init();
-            this.currentUser = identity;
-            this.socket = P2P.getSocket();
-            VideoCallView.setupSocketHandlers();
-
-            if (identity.profile.name === 'Anonymous') {
-                this.showView('auth');
-            } else {
+            
+            if (identity && identity.profile.name !== 'Anonymous') {
+                this.currentUser = identity;
                 await this.initializeMainView();
+            } else {
+                this.showView('auth');
             }
 
             window.App = this;
         } catch (error) {
-            console.error('Failed to initialize P2P:', error);
-            document.getElementById('setup-error').textContent = 'Failed to connect to signaling network.';
+            console.error('Failed to initialize:', error);
+            this.showView('auth');
         }
     },
 
@@ -51,6 +48,20 @@ const App = {
         await ContactsView.loadConversations();
         await ContactsView.loadContacts();
         ChatView.showEmptyState();
+        
+        // Auto-connect to known contacts
+        this.autoConnectContacts();
+    },
+
+    async autoConnectContacts() {
+        try {
+            const contacts = await getAllContacts();
+            for (const contact of contacts) {
+                P2P.connectToPeer(contact.pubKeyHex).catch(() => {});
+            }
+        } catch (err) {
+            console.error('Auto-connect failed:', err);
+        }
     },
 
     updateUserUI() {
@@ -71,9 +82,10 @@ const App = {
         const confirmLogout = confirm('Are you sure you want to log out? Local data will remain on this device.');
         if (!confirmLogout) return;
 
-        P2P.teardown();
+        await P2P.teardown();
         this.currentUser = null;
-        this.socket = null;
+        this.onlineUsers = new Set();
+        AuthView.resetUI();
         this.showView('auth');
     },
 

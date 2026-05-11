@@ -25,19 +25,19 @@ const ContactsView = {
         // Add Contact Modal
         document.getElementById('btn-add-contact').addEventListener('click', () => {
             document.getElementById('modal-add-contact').classList.remove('hidden');
-            setTimeout(() => document.getElementById('add-contact-string').focus(), 100);
+            setTimeout(() => document.getElementById('add-contact-id').focus(), 100);
         });
 
         document.getElementById('btn-cancel-add-contact').addEventListener('click', () => {
             document.getElementById('modal-add-contact').classList.add('hidden');
-            document.getElementById('add-contact-string').value = '';
+            document.getElementById('add-contact-id').value = '';
             document.getElementById('add-contact-error').textContent = '';
         });
 
         document.getElementById('btn-confirm-add-contact').addEventListener('click', () => this.addContact());
         
         // Handle enter key in add contact
-        document.getElementById('add-contact-string').addEventListener('keypress', (e) => {
+        document.getElementById('add-contact-id').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.addContact();
         });
     },
@@ -61,22 +61,37 @@ const ContactsView = {
     },
 
     async addContact() {
-        const inputString = document.getElementById('add-contact-string').value.trim();
+        const rawInput = document.getElementById('add-contact-id').value.trim();
         const errorEl = document.getElementById('add-contact-error');
         const btn = document.getElementById('btn-confirm-add-contact');
         
-        if (!inputString) return;
+        if (!rawInput) return;
+
+        // Clean up input — accept hex with or without dashes, spaces, etc.
+        const pubKeyHex = rawInput.replace(/[-\s]/g, '').toLowerCase();
+
+        // Validate: must be 64 hex chars (32-byte Ed25519 public key)
+        if (!/^[0-9a-f]{64}$/.test(pubKeyHex)) {
+            errorEl.textContent = 'Invalid User ID. Should be a 64-character hex string.';
+            return;
+        }
+
+        // Don't add yourself
+        if (pubKeyHex === App.currentUser.pubKeyHex) {
+            errorEl.textContent = "That's your own ID!";
+            return;
+        }
 
         btn.innerHTML = '<span>Connecting...</span>';
         btn.disabled = true;
         errorEl.textContent = '';
 
         try {
-            // Initiate P2P connection to exchange profiles
-            const pubKeyHex = await P2P.connectFromString(inputString);
+            // Connect via Hyperswarm DHT
+            await P2P.connectToPeer(pubKeyHex);
             
-            // Wait shortly for profile exchange if online
-            await new Promise(res => setTimeout(res, 2000));
+            // Wait a bit for profile exchange
+            await new Promise(res => setTimeout(res, 3000));
             
             // Check if contact was added (P2P layer upserts it when profile received)
             let contact = await getContact(pubKeyHex);
@@ -90,11 +105,11 @@ const ContactsView = {
                 await upsertContact(contact);
             }
 
-            // Create a conversation implicitly
+            // Create a conversation
             const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, pubKeyHex);
 
             document.getElementById('modal-add-contact').classList.add('hidden');
-            document.getElementById('add-contact-string').value = '';
+            document.getElementById('add-contact-id').value = '';
             
             // Reload views
             await this.loadContacts();
@@ -106,7 +121,7 @@ const ContactsView = {
 
         } catch (error) {
             console.error('Add contact failed:', error);
-            errorEl.textContent = 'Invalid connection string or connection failed.';
+            errorEl.textContent = 'Failed to connect. Make sure the ID is correct.';
         } finally {
             btn.innerHTML = '<span>Connect</span>';
             btn.disabled = false;

@@ -1,7 +1,15 @@
 const { app, BrowserWindow, ipcMain, Notification, desktopCapturer, session, shell, safeStorage } = require('electron');
 const path = require('path');
+const SwarmManager = require('./swarm');
 
 let mainWindow;
+
+// Handle --user-data-dir flag for running multiple instances
+const userDataDirArg = process.argv.find(arg => arg.startsWith('--user-data-dir='));
+if (userDataDirArg) {
+  const dir = userDataDirArg.split('=')[1];
+  app.setPath('userData', path.resolve(dir));
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -36,7 +44,7 @@ function createWindow() {
           " script-src 'self';" +
           " style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;" +
           " font-src https://fonts.gstatic.com;" +
-          " connect-src * data: blob: 'unsafe-inline';" +
+          " connect-src 'self' data: blob:;" +
           " img-src 'self' https: data: blob:;" +
           " media-src 'self' blob:;"
         ],
@@ -76,6 +84,9 @@ function createWindow() {
     console.log(`[Renderer]: ${message}`);
   });
 
+  // Initialize SwarmManager with this window
+  SwarmManager.init(mainWindow);
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -88,7 +99,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   // ── Permission Handling ─────────────────────────────────────────
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = ['media', 'mediaKeySystem', 'display-capture'];
+    const allowedPermissions = ['media', 'mediaKeySystem', 'display-capture', 'clipboard-sanitized-write'];
     if (allowedPermissions.includes(permission)) {
       callback(true);
     } else {
@@ -98,7 +109,7 @@ app.whenReady().then(async () => {
   });
 
   session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
-    const allowedPermissions = ['media', 'mediaKeySystem', 'display-capture'];
+    const allowedPermissions = ['media', 'mediaKeySystem', 'display-capture', 'clipboard-sanitized-write'];
     return allowedPermissions.includes(permission);
   });
 
@@ -120,6 +131,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  SwarmManager.teardown();
   app.quit();
 });
 
@@ -131,14 +143,14 @@ app.on('activate', () => {
 
 // ── IPC Handlers ──────────────────────────────────────────────────
 
+// Notifications
 ipcMain.handle('show-notification', (event, { title, body }) => {
   const safeTitle = String(title).substring(0, 100);
   const safeBody = String(body).substring(0, 200);
   new Notification({ title: safeTitle, body: safeBody }).show();
 });
 
-ipcMain.handle('get-signaling-port', () => 3001);
-
+// Desktop sources for screen sharing
 ipcMain.handle('get-desktop-sources', async () => {
   try {
     const sources = await desktopCapturer.getSources({
@@ -156,9 +168,8 @@ ipcMain.handle('get-desktop-sources', async () => {
   }
 });
 
-// Open external URLs safely (P3 #9)
+// Open external URLs safely
 ipcMain.handle('open-external', (event, url) => {
-  // Only allow http/https URLs
   try {
     const parsed = new URL(url);
     if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
@@ -167,4 +178,70 @@ ipcMain.handle('open-external', (event, url) => {
   } catch (e) {
     console.warn('[Security] Blocked openExternal for invalid URL:', url);
   }
+});
+
+// ── Hyperswarm IPC Handlers ──────────────────────────────────────
+
+// Initialize swarm with seed, returns public key hex
+ipcMain.handle('swarm-init', async (event, seedArray) => {
+  try {
+    const pubKeyHex = await SwarmManager.startSwarm(seedArray);
+    return pubKeyHex;
+  } catch (err) {
+    console.error('[IPC] swarm-init failed:', err);
+    throw err;
+  }
+});
+
+// Connect to a peer by their public key hex
+ipcMain.handle('swarm-connect-peer', async (event, remotePubKeyHex) => {
+  try {
+    return await SwarmManager.connectToPeer(remotePubKeyHex);
+  } catch (err) {
+    console.error('[IPC] swarm-connect-peer failed:', err);
+    return false;
+  }
+});
+
+// Send a message to a peer
+ipcMain.handle('swarm-send', (event, { to, message }) => {
+  return SwarmManager.sendToPeer(to, message);
+});
+
+// Check if a peer is connected
+ipcMain.handle('swarm-is-connected', (event, remotePubKeyHex) => {
+  return SwarmManager.isPeerConnected(remotePubKeyHex);
+});
+
+// Get list of online peers
+ipcMain.handle('swarm-get-online-peers', () => {
+  return SwarmManager.getOnlinePeers();
+});
+
+// Get own public key
+ipcMain.handle('swarm-get-pubkey', () => {
+  return SwarmManager.getPublicKeyHex();
+});
+
+// Teardown swarm
+ipcMain.handle('swarm-teardown', async () => {
+  await SwarmManager.teardown();
+});
+
+// ── Safe Storage (for mnemonic encryption) ──────────────────────
+
+ipcMain.handle('safe-storage-encrypt', (event, data) => {
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(data);
+    return encrypted.toString('base64');
+  }
+  return null;
+});
+
+ipcMain.handle('safe-storage-decrypt', (event, encryptedB64) => {
+  if (safeStorage.isEncryptionAvailable()) {
+    const buffer = Buffer.from(encryptedB64, 'base64');
+    return safeStorage.decryptString(buffer);
+  }
+  return null;
 });

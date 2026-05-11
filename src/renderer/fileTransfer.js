@@ -1,108 +1,134 @@
-// fileTransfer.js — Chunked P2P file transfer over simple-peer data channel
+// fileTransfer.js — File transfer over Hyperswarm streams
+// Files are chunked and sent as base64 over the JSON message protocol
 
-const CHUNK_SIZE = 16 * 1024;  // 16KB chunks — safe for WebRTC data channels
+const FileTransfer = {
+    pendingReceive: new Map(), // fileId → { meta, chunks: [], received: 0 }
+    CHUNK_SIZE: 48 * 1024, // 48KB per chunk (safe for JSON serialization)
 
-const incomingFiles = new Map();  // transferId → { meta, chunks, received }
+    // ── Send a file ─────────────────────────────────────────────────
 
-// ── Send ──────────────────────────────────────────────────────────────────────
+    async sendFile(remotePubKeyHex, file) {
+        const fileId = crypto.randomUUID();
+        const totalChunks = Math.ceil(file.size / this.CHUNK_SIZE);
 
-async function sendFileP2P(peer, file, onProgress) {
-  const transferId = crypto.randomUUID();
-  const buf        = await file.arrayBuffer();
-  const totalChunks = Math.ceil(buf.byteLength / CHUNK_SIZE);
+        // Send metadata first
+        P2P.sendRaw(remotePubKeyHex, {
+            type: 'file-meta',
+            fileId,
+            name: file.name,
+            size: file.size,
+            mimeType: file.type || 'application/octet-stream',
+            totalChunks,
+        });
 
-  // 1. Send metadata first
-  peer.send(JSON.stringify({
-    type: 'file-meta',
-    transferId,
-    name:        file.name,
-    size:        file.size,
-    mimeType:    file.type,
-    totalChunks,
-  }));
+        // Read and send chunks
+        const arrayBuffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
 
-  // 2. Send chunks sequentially with backpressure
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const chunk = buf.slice(start, start + CHUNK_SIZE);
+        for (let i = 0; i < totalChunks; i++) {
+            const start = i * this.CHUNK_SIZE;
+            const end = Math.min(start + this.CHUNK_SIZE, file.size);
+            const chunk = bytes.slice(start, end);
 
-    // Wait if the data channel buffer is filling up
-    while (peer._channel?.bufferedAmount > 1024 * 1024) {
-      await new Promise(r => setTimeout(r, 50));
-    }
+            // Encode chunk as base64
+            const base64 = this._uint8ToBase64(chunk);
 
-    // Send JSON header + raw chunk concatenated as ArrayBuffer
-    const header     = JSON.stringify({ type: 'file-chunk', transferId, index: i });
-    const headerBuf  = new TextEncoder().encode(header + '\n');
-    const combined   = new Uint8Array(headerBuf.byteLength + chunk.byteLength);
-    combined.set(new Uint8Array(headerBuf), 0);
-    combined.set(new Uint8Array(chunk), headerBuf.byteLength);
+            P2P.sendRaw(remotePubKeyHex, {
+                type: 'file-chunk',
+                fileId,
+                index: i,
+                data: base64,
+            });
 
-    peer.send(combined.buffer);
-    onProgress?.((i + 1) / totalChunks);
-  }
-}
+            // Small delay between chunks to avoid overwhelming the stream
+            if (i % 5 === 4) {
+                await new Promise(r => setTimeout(r, 10));
+            }
+        }
 
-// ── Receive ───────────────────────────────────────────────────────────────────
+        console.log(`[FileTransfer] Sent ${file.name} (${totalChunks} chunks)`);
+        return fileId;
+    },
 
-function handleFileMeta(remotePubKeyHex, meta) {
-  incomingFiles.set(meta.transferId, {
-    meta,
-    from: remotePubKeyHex,
-    chunks:   new Array(meta.totalChunks),
-    received: 0,
-  });
-  console.log(`[file] incoming: ${meta.name} (${meta.totalChunks} chunks)`);
-}
+    // ── Receive handlers ────────────────────────────────────────────
 
-function handleFileChunk(remotePubKeyHex, rawBuf) {
-  // rawBuf is an ArrayBuffer or Uint8Array: JSON header + '\n' + binary chunk
-  const view       = new Uint8Array(rawBuf);
-  const newlineIdx = view.indexOf(0x0a);  // '\n'
-  if (newlineIdx < 0) return;
+    handleMeta(remotePubKeyHex, msg) {
+        console.log(`[FileTransfer] Receiving ${msg.name} (${msg.totalChunks} chunks)`);
+        this.pendingReceive.set(msg.fileId, {
+            from: remotePubKeyHex,
+            meta: {
+                name: msg.name,
+                size: msg.size,
+                mimeType: msg.mimeType,
+                totalChunks: msg.totalChunks,
+            },
+            chunks: new Array(msg.totalChunks),
+            received: 0,
+        });
+    },
 
-  const headerStr  = new TextDecoder().decode(view.slice(0, newlineIdx));
-  const chunkData  = view.slice(newlineIdx + 1).buffer;
+    handleChunk(remotePubKeyHex, msg) {
+        const pending = this.pendingReceive.get(msg.fileId);
+        if (!pending) return;
 
-  let parsed;
-  try { parsed = JSON.parse(headerStr); } catch { return; }
-  const { transferId, index } = parsed;
+        pending.chunks[msg.index] = this._base64ToUint8(msg.data);
+        pending.received++;
 
-  const entry = incomingFiles.get(transferId);
-  if (!entry) return;
+        // Check if complete
+        if (pending.received >= pending.meta.totalChunks) {
+            this._assembleFile(msg.fileId, pending);
+        }
+    },
 
-  entry.chunks[index] = chunkData;
-  entry.received++;
+    _assembleFile(fileId, pending) {
+        // Concatenate all chunks
+        const totalSize = pending.chunks.reduce((sum, c) => sum + c.length, 0);
+        const result = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const chunk of pending.chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+        }
 
-  if (entry.received === entry.meta.totalChunks) {
-    // Reassemble
-    const total  = entry.chunks.reduce((acc, c) => acc + c.byteLength, 0);
-    const merged = new Uint8Array(total);
-    let offset   = 0;
-    for (const c of entry.chunks) {
-      merged.set(new Uint8Array(c), offset);
-      offset += c.byteLength;
-    }
+        // Create blob URL
+        const blob = new Blob([result], { type: pending.meta.mimeType });
+        const url = URL.createObjectURL(blob);
 
-    const blob = new Blob([merged], { type: entry.meta.mimeType });
-    const url  = URL.createObjectURL(blob);
+        console.log(`[FileTransfer] Assembled ${pending.meta.name} (${totalSize} bytes)`);
 
-    // Dispatch to UI
-    window.dispatchEvent(new CustomEvent('file-received', {
-      detail: {
-        transferId,
-        from: entry.from,
-        name: entry.meta.name,
-        size: entry.meta.size,
-        mimeType: entry.meta.mimeType,
-        url,
-        blob,
-      },
-    }));
+        // Dispatch event for chat.js to handle
+        window.dispatchEvent(new CustomEvent('file-received', {
+            detail: {
+                from: pending.from,
+                name: pending.meta.name,
+                size: pending.meta.size,
+                mimeType: pending.meta.mimeType,
+                url,
+            }
+        }));
 
-    incomingFiles.delete(transferId);
-  }
-}
+        this.pendingReceive.delete(fileId);
+    },
 
-// Make available globally for p2p.js to call
-window.__fileTransfer = { handleMeta: handleFileMeta, handleChunk: handleFileChunk };
+    // ── Base64 helpers ───────────────────────────────────────────────
+
+    _uint8ToBase64(uint8) {
+        let binary = '';
+        for (let i = 0; i < uint8.length; i++) {
+            binary += String.fromCharCode(uint8[i]);
+        }
+        return btoa(binary);
+    },
+
+    _base64ToUint8(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    },
+};
+
+// Expose globally for p2p.js
+window.__fileTransfer = FileTransfer;

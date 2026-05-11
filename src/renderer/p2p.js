@@ -1,186 +1,95 @@
-// p2p.js — Replaces appwrite.js entirely
-// Handles: signaling, WebRTC peer management, messaging, receipts
+// p2p.js — P2P layer (bridges renderer to main process Hyperswarm via IPC)
+// Replaces Socket.io + SimplePeer with Hyperswarm streams
 
-const SIGNAL_SERVER = 'https://ay-signaling.onrender.com';
-
-let p2pSocket   = null;
 let p2pIdentity = null;
-const peers      = new Map();   // pubKeyHex → SimplePeer instance
 
-// Event callbacks (set from app.js / chat.js)
+// Event callbacks (set from app.js / chat.js / videoCall.js)
 const P2P = {
-    onMessage:    null,  // ({ remotePubKeyHex, plaintext, msgId, timestamp }) =>
-    onTyping:     null,  // ({ remotePubKeyHex, isTyping }) =>
-    onReceipt:    null,  // ({ msgId, status }) =>
-    onPeerOnline: null,  // (pubKeyHex) =>
-    onPeerProfile: null, // ({ pubKeyHex, profile }) =>
+    onMessage:     null,  // ({ remotePubKeyHex, plaintext, msgId, timestamp }) =>
+    onTyping:      null,  // ({ remotePubKeyHex, isTyping }) =>
+    onReceipt:     null,  // ({ msgId, status }) =>
+    onPeerOnline:  null,  // (pubKeyHex) =>
+    onPeerOffline: null,  // (pubKeyHex) =>
+    onPeerProfile: null,  // ({ pubKeyHex, profile }) =>
+    onCallSignal:  null,  // ({ from, data }) =>  — for video call signaling
 
     // ── Init ──────────────────────────────────────────────────────────
 
     async init() {
-        p2pIdentity = await getOrCreateIdentity();
+        // Try to load existing identity and re-init swarm
+        const identity = await initExistingIdentity();
+        if (!identity) return null;
 
-        p2pSocket = io(SIGNAL_SERVER, {
-            query: { peerId: p2pIdentity.pubKeyHex },
-            transports: ['websocket'],
-            reconnection: true,
-            reconnectionAttempts: Infinity,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 10000,
-            timeout: 10000,
-        });
-
-        p2pSocket.on('connect', () => {
-            console.log('[p2p] Connected to signaling server');
-            p2pSocket.emit('register', p2pIdentity.pubKeyHex);
-        });
-
-        p2pSocket.on('signal', async ({ from, data }) => {
-            let peer = peers.get(from);
-            if (!peer) {
-                // Incoming connection — we are NOT the initiator
-                peer = await P2P.createPeer(from, false);
-            }
-            peer.signal(data);
-        });
-
-        p2pSocket.on('online-users', (users) => {
-            // Forward to app for UI updates
-            if (typeof App !== 'undefined' && App.onOnlineUsers) {
-                App.onOnlineUsers(users);
-            }
-        });
-
-        p2pSocket.on('reconnect', () => {
-            console.log('[p2p] Reconnected to signaling server');
-            p2pSocket.emit('register', p2pIdentity.pubKeyHex);
-        });
-
+        p2pIdentity = identity;
+        this.setupEventListeners();
         return p2pIdentity;
     },
 
-    getSocket() {
-        return p2pSocket;
+    async initWithIdentity(identity) {
+        p2pIdentity = identity;
+        this.setupEventListeners();
+        return p2pIdentity;
+    },
+
+    setupEventListeners() {
+        // Listen for messages from main process (Hyperswarm)
+        window.electronAPI.onSwarmMessage(({ from, message }) => {
+            this.handleIncoming(from, message);
+        });
+
+        window.electronAPI.onSwarmPeerConnected(({ pubKeyHex }) => {
+            console.log('[P2P] Peer connected:', pubKeyHex.slice(0, 12));
+            // Send our profile immediately
+            this.sendRaw(pubKeyHex, { type: 'profile', payload: p2pIdentity.profile });
+            P2P.onPeerOnline?.(pubKeyHex);
+        });
+
+        window.electronAPI.onSwarmPeerDisconnected(({ pubKeyHex }) => {
+            console.log('[P2P] Peer disconnected:', pubKeyHex.slice(0, 12));
+            P2P.onPeerOffline?.(pubKeyHex);
+        });
+
+        window.electronAPI.onSwarmOnlinePeers((peers) => {
+            if (typeof App !== 'undefined' && App.onOnlineUsers) {
+                App.onOnlineUsers(peers);
+            }
+        });
     },
 
     getIdentity() {
         return p2pIdentity;
     },
 
-    // ── Connect to a peer (by pubkey) ─────────────────────────────────
+    // ── Connect to a peer (by pubkey hex) ──────────────────────────
 
     async connectToPeer(remotePubKeyHex) {
-        if (peers.has(remotePubKeyHex)) return peers.get(remotePubKeyHex);
-        const peer = await P2P.createPeer(remotePubKeyHex, true);
-        return peer;
+        return await window.electronAPI.swarmConnectPeer(remotePubKeyHex);
     },
 
-    // Call this when the user pastes a connection string
-    async connectFromString(connStr) {
-        const remotePubKeyHex = parseConnectionString(connStr);
-        await P2P.connectToPeer(remotePubKeyHex);
-        return remotePubKeyHex;
+    async isPeerConnected(remotePubKeyHex) {
+        return await window.electronAPI.swarmIsConnected(remotePubKeyHex);
     },
 
-    isPeerConnected(remotePubKeyHex) {
-        const peer = peers.get(remotePubKeyHex);
-        return peer && peer.connected;
-    },
-
-    getPeer(remotePubKeyHex) {
-        return peers.get(remotePubKeyHex);
-    },
-
-    // ── SimplePeer factory ────────────────────────────────────────────
-
-    async createPeer(remotePubKeyHex, initiator) {
-        const sharedKey = await Encryption.deriveSharedKeyFor(p2pIdentity.privKeyB64, remotePubKeyHex);
-
-        const peer = new SimplePeer({
-            initiator,
-            trickle: true,
-            config: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:global.stun.twilio.com:3478' },
-                ],
-            },
-        });
-
-        peers.set(remotePubKeyHex, peer);
-
-        // Forward SDP/ICE through signaling server ONLY
-        peer.on('signal', data => {
-            p2pSocket.emit('signal', { to: remotePubKeyHex, from: p2pIdentity.pubKeyHex, data });
-        });
-
-        peer.on('connect', () => {
-            console.log('[p2p] connected to', remotePubKeyHex.slice(0, 12));
-            // Exchange profile immediately on connect
-            P2P.sendRaw(peer, { type: 'profile', payload: p2pIdentity.profile });
-        });
-
-        peer.on('data', async raw => {
-            let msg;
-            try {
-                // Handle both string and ArrayBuffer data
-                if (raw instanceof ArrayBuffer || raw instanceof Uint8Array) {
-                    // Could be a file chunk — check if it starts with JSON
-                    const view = new Uint8Array(raw);
-                    const newlineIdx = view.indexOf(0x0a);
-                    if (newlineIdx > 0 && newlineIdx < 500) {
-                        // Likely file-chunk with header\nbinary format
-                        try {
-                            const headerStr = new TextDecoder().decode(view.slice(0, newlineIdx));
-                            const header = JSON.parse(headerStr);
-                            if (header.type === 'file-chunk') {
-                                window.__fileTransfer?.handleChunk(remotePubKeyHex, raw);
-                                return;
-                            }
-                        } catch (_) {}
-                    }
-                    // Try as JSON string
-                    msg = JSON.parse(new TextDecoder().decode(raw));
-                } else {
-                    msg = JSON.parse(raw);
-                }
-            } catch {
-                return;
-            }
-            await P2P.handleIncoming(remotePubKeyHex, msg, sharedKey);
-        });
-
-        peer.on('error', err => console.error('[p2p] peer error', err));
-        peer.on('close', () => { peers.delete(remotePubKeyHex); });
-
-        return peer;
-    },
-
-    // ── Outgoing message ──────────────────────────────────────────────
+    // ── Outgoing message ──────────────────────────────────────────
 
     async sendMessage(remotePubKeyHex, plaintext) {
-        const peer      = peers.get(remotePubKeyHex);
-        const sharedKey = await Encryption.deriveSharedKeyFor(p2pIdentity.privKeyB64, remotePubKeyHex);
+        const isConnected = await this.isPeerConnected(remotePubKeyHex);
+        if (!isConnected) throw new Error('Peer not connected');
 
-        if (!peer || !peer.connected) throw new Error('Peer not connected');
-
-        const { ciphertext, iv } = await Encryption.encryptMessage(sharedKey, plaintext);
         const conv = await getOrCreateConversationLocal(p2pIdentity.pubKeyHex, remotePubKeyHex);
-
         const msgId = crypto.randomUUID();
         const timestamp = Date.now();
-        const packet = { type: 'message', id: msgId, ciphertext, iv, timestamp };
-        P2P.sendRaw(peer, packet);
 
-        // Save locally immediately
+        // Send over Hyperswarm (already encrypted by Noise protocol)
+        const packet = { type: 'message', id: msgId, content: plaintext, timestamp };
+        this.sendRaw(remotePubKeyHex, packet);
+
+        // Save locally
         await saveMessage({
             id: msgId,
             conversationId: conv.id,
             senderId: p2pIdentity.pubKeyHex,
             content: plaintext,
-            ciphertext,
-            iv,
             timestamp,
             status: 'sent',
             type: 'text',
@@ -191,13 +100,38 @@ const P2P = {
     },
 
     sendTyping(remotePubKeyHex, isTyping) {
-        const peer = peers.get(remotePubKeyHex);
-        if (peer?.connected) P2P.sendRaw(peer, { type: 'typing', isTyping });
+        this.sendRaw(remotePubKeyHex, { type: 'typing', isTyping });
     },
 
-    // ── Incoming message handler ──────────────────────────────────────
+    // ── Video call signaling over Hyperswarm ─────────────────────
 
-    async handleIncoming(remotePubKeyHex, msg, sharedKey) {
+    sendCallSignal(remotePubKeyHex, signalData) {
+        this.sendRaw(remotePubKeyHex, { type: 'call-signal', data: signalData });
+    },
+
+    sendCallRequest(remotePubKeyHex, callerName) {
+        this.sendRaw(remotePubKeyHex, { type: 'call-request', callerName });
+    },
+
+    sendCallAccepted(remotePubKeyHex) {
+        this.sendRaw(remotePubKeyHex, { type: 'call-accepted' });
+    },
+
+    sendCallRejected(remotePubKeyHex) {
+        this.sendRaw(remotePubKeyHex, { type: 'call-rejected' });
+    },
+
+    sendCallEnded(remotePubKeyHex) {
+        this.sendRaw(remotePubKeyHex, { type: 'call-ended' });
+    },
+
+    sendCallBusy(remotePubKeyHex) {
+        this.sendRaw(remotePubKeyHex, { type: 'call-busy' });
+    },
+
+    // ── Incoming message handler ──────────────────────────────────
+
+    async handleIncoming(remotePubKeyHex, msg) {
         switch (msg.type) {
 
             case 'profile': {
@@ -210,34 +144,29 @@ const P2P = {
             }
 
             case 'message': {
-                let plaintext;
-                try {
-                    plaintext = await Encryption.decryptMessage(sharedKey, msg.ciphertext, msg.iv);
-                } catch (e) {
-                    console.error('[p2p] Decryption failed:', e);
-                    plaintext = '[Could not decrypt message]';
-                }
-
                 const conv = await getOrCreateConversationLocal(p2pIdentity.pubKeyHex, remotePubKeyHex);
 
                 await saveMessage({
                     id: msg.id,
                     conversationId: conv.id,
                     senderId: remotePubKeyHex,
-                    content: plaintext,
-                    ciphertext: msg.ciphertext,
-                    iv: msg.iv,
+                    content: msg.content,
                     timestamp: msg.timestamp,
                     status: 'delivered',
                     type: 'text',
                 });
-                await updateConversationPreview(conv.id, plaintext.slice(0, 60));
+                await updateConversationPreview(conv.id, msg.content.slice(0, 60));
 
                 // Send delivery receipt
-                const peer = peers.get(remotePubKeyHex);
-                if (peer?.connected) P2P.sendRaw(peer, { type: 'receipt', msgId: msg.id, status: 'delivered' });
+                this.sendRaw(remotePubKeyHex, { type: 'receipt', msgId: msg.id, status: 'delivered' });
 
-                P2P.onMessage?.({ remotePubKeyHex, plaintext, msgId: msg.id, timestamp: msg.timestamp, conversationId: conv.id });
+                P2P.onMessage?.({
+                    remotePubKeyHex,
+                    plaintext: msg.content,
+                    msgId: msg.id,
+                    timestamp: msg.timestamp,
+                    conversationId: conv.id,
+                });
                 break;
             }
 
@@ -256,26 +185,54 @@ const P2P = {
                 window.__fileTransfer?.handleMeta(remotePubKeyHex, msg);
                 break;
             }
+
+            case 'file-chunk': {
+                window.__fileTransfer?.handleChunk(remotePubKeyHex, msg);
+                break;
+            }
+
+            // Video call signaling
+            case 'call-signal': {
+                P2P.onCallSignal?.({ from: remotePubKeyHex, data: msg.data });
+                break;
+            }
+
+            case 'call-request': {
+                VideoCallView.handleIncomingCall(remotePubKeyHex, msg.callerName);
+                break;
+            }
+
+            case 'call-accepted': {
+                VideoCallView.handleCallAccepted(remotePubKeyHex);
+                break;
+            }
+
+            case 'call-rejected': {
+                VideoCallView.handleCallRejected(remotePubKeyHex);
+                break;
+            }
+
+            case 'call-ended': {
+                VideoCallView.handleCallEnded(remotePubKeyHex);
+                break;
+            }
+
+            case 'call-busy': {
+                VideoCallView.handleCallBusy(remotePubKeyHex);
+                break;
+            }
         }
     },
 
-    // ── Helpers ───────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────
 
-    sendRaw(peer, obj) {
-        peer.send(JSON.stringify(obj));
+    sendRaw(remotePubKeyHex, obj) {
+        window.electronAPI.swarmSend(remotePubKeyHex, obj);
     },
 
-    // Teardown — disconnect all peers and socket
-    teardown() {
-        for (const [key, peer] of peers) {
-            try { peer.destroy(); } catch (_) {}
-        }
-        peers.clear();
-        Encryption.clearCache();
-        if (p2pSocket) {
-            p2pSocket.disconnect();
-            p2pSocket = null;
-        }
+    // Teardown
+    async teardown() {
+        await window.electronAPI.swarmTeardown();
         p2pIdentity = null;
     },
 };

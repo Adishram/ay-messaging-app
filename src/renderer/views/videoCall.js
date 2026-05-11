@@ -1,4 +1,5 @@
 // ── Video Call View Controller ────────────────────────────────────
+// Uses WebRTC (SimplePeer) for video/audio, signaling via Hyperswarm streams
 const VideoCallView = {
     peer: null,
     localStream: null,
@@ -7,8 +8,8 @@ const VideoCallView = {
     isMuted: false,
     isCameraOff: false,
     isScreenSharing: false,
-    incomingOffer: null,
     startWithScreenShare: false,
+    pendingSignals: [], // Buffer signals before peer is created
 
     init() {
         document.getElementById('btn-end-call').addEventListener('click', () => this.endCall());
@@ -17,75 +18,52 @@ const VideoCallView = {
         document.getElementById('btn-screen-share').addEventListener('click', () => this.toggleScreenShare());
         document.getElementById('btn-accept-call').addEventListener('click', () => this.acceptCall());
         document.getElementById('btn-reject-call').addEventListener('click', () => this.rejectCall());
+
+        // Set up P2P call signal handler — buffers signals if peer not ready
+        P2P.onCallSignal = ({ from, data }) => {
+            if (this.peer && this.currentCallPeerId === from && !this.peer.destroyed) {
+                this.peer.signal(data);
+            } else if (this.currentCallPeerId === from) {
+                // Buffer signals until peer is created (receiver hasn't accepted yet)
+                console.log('[VideoCall] Buffering signal from', from.slice(0, 12));
+                this.pendingSignals.push(data);
+            }
+        };
     },
 
-    setupSocketHandlers() {
-        if (!App.socket) {
-            console.warn('[VideoCall] No socket available');
+    // Called by P2P when a call-request message arrives
+    handleIncomingCall(from, callerName) {
+        console.log('[VideoCall] Incoming call from:', callerName);
+        if (this.peer) {
+            P2P.sendCallBusy(from);
             return;
         }
-        console.log('[VideoCall] Setting up socket handlers');
+        this.currentCallPeerId = from;
+        this.pendingSignals = []; // Clear old signals
+        this.showIncomingCallUI(callerName);
+    },
 
-        App.socket.on('incoming-call', ({ from, offer, callerName }) => {
-            console.log('[VideoCall] Incoming call from:', callerName);
-            // Auto-reject if already in a call (busy)
-            if (this.peer) {
-                console.log('[VideoCall] Already in call, sending busy');
-                App.socket.emit('call-busy', { to: from });
-                return;
-            }
-            this.incomingOffer = { from, offer };
-            this.showIncomingCall(callerName, from);
-        });
+    handleCallAccepted(from) {
+        console.log('[VideoCall] Call accepted by', from.slice(0, 12));
+        document.getElementById('call-status').textContent = 'Connected';
+        document.getElementById('call-info').classList.add('hidden');
+    },
 
-        App.socket.on('call-accepted', ({ from, answer }) => {
-            console.log('[VideoCall] Call accepted, signaling answer to peer');
-            if (this.peer) {
-                this.peer.signal(answer);
-            }
-            document.getElementById('call-status').textContent = 'Connected';
-            document.getElementById('call-info').classList.add('hidden');
-        });
+    handleCallRejected(from) {
+        document.getElementById('call-status').textContent = 'Call rejected';
+        setTimeout(() => this.endCall(), 2000);
+    },
 
-        App.socket.on('call-rejected', ({ from }) => {
-            document.getElementById('call-status').textContent = 'Call rejected';
-            setTimeout(() => this.endCall(), 2000);
-        });
+    handleCallEnded(from) {
+        console.log('[VideoCall] Call ended by remote');
+        document.getElementById('incoming-call-modal').classList.add('hidden');
+        this.cleanupCall();
+        App.showView('main');
+    },
 
-        App.socket.on('call-ended', ({ from }) => {
-            console.log('[VideoCall] Call ended by remote');
-            document.getElementById('incoming-call-modal').classList.add('hidden');
-            this.incomingOffer = null;
-            this.cleanupCall();
-            App.showView('main');
-        });
-
-        // Handle Trickle ICE Candidates
-        App.socket.on('ice-candidate', ({ from, candidate }) => {
-            if (this.peer && this.currentCallPeerId === from && !this.peer.destroyed) {
-                this.peer.signal(candidate);
-            }
-        });
-
-        App.socket.on('call-error', ({ message }) => {
-            document.getElementById('call-status').textContent = message;
-            setTimeout(() => this.endCall(), 2000);
-        });
-
-        App.socket.on('call-busy', () => {
-            document.getElementById('call-status').textContent = 'User is busy on another call';
-            setTimeout(() => this.endCall(), 2000);
-        });
-
-        App.socket.on('screen-share-started', () => {
-            // Remote side started screen sharing — no overlay needed,
-            // the remote track replacement handles it automatically
-            console.log('[VideoCall] Remote started screen sharing');
-        });
-
-        App.socket.on('screen-share-stopped', () => {
-            console.log('[VideoCall] Remote stopped screen sharing');
-        });
+    handleCallBusy(from) {
+        document.getElementById('call-status').textContent = 'User is busy on another call';
+        setTimeout(() => this.endCall(), 2000);
     },
 
     // ── Start Call (caller side) ─────────────────────────────────────
@@ -102,12 +80,11 @@ const VideoCallView = {
         try {
             this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             document.getElementById('local-video').srcObject = this.localStream;
-            console.log('[VideoCall] Local media acquired, creating peer (initiator)');
 
             this.peer = new SimplePeer({
                 initiator: true,
                 stream: this.localStream,
-                trickle: true, // Enable Trickle ICE for much faster/reliable connections
+                trickle: true,
                 config: {
                     iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
@@ -118,17 +95,12 @@ const VideoCallView = {
             });
 
             this.peer.on('signal', (data) => {
+                // Send call request with first offer, then signal data for ICE
                 if (data.type === 'offer') {
-                    console.log('[VideoCall] Sending offer to', peerId);
-                    App.socket.emit('call-user', {
-                        to: peerId,
-                        offer: data,
-                        callerName: App.currentUser.profile.name, // Fixed bug: was App.currentUser.name
-                    });
-                } else if (data.candidate) {
-                    // Send ICE candidates individually as they are gathered
-                    App.socket.emit('ice-candidate', { to: peerId, candidate: data });
+                    P2P.sendCallRequest(peerId, App.currentUser.profile.name);
                 }
+                // Send all signal data (offer, answer, ICE candidates)
+                P2P.sendCallSignal(peerId, data);
             });
 
             this.peer.on('stream', (remoteStream) => {
@@ -160,7 +132,7 @@ const VideoCallView = {
 
     // ── Incoming Call UI ─────────────────────────────────────────────
 
-    showIncomingCall(callerName) {
+    showIncomingCallUI(callerName) {
         const initials = ContactsView.getInitials(callerName);
         document.getElementById('incoming-caller-avatar').textContent = initials;
         document.getElementById('incoming-caller-name').textContent = callerName;
@@ -175,9 +147,8 @@ const VideoCallView = {
 
     async acceptCall() {
         document.getElementById('incoming-call-modal').classList.add('hidden');
-        if (!this.incomingOffer) return;
-        const { from, offer } = this.incomingOffer;
-        this.currentCallPeerId = from;
+        if (!this.currentCallPeerId) return;
+        const from = this.currentCallPeerId;
 
         App.showView('video-call');
         document.getElementById('call-peer-name').textContent = 'Connecting...';
@@ -187,7 +158,6 @@ const VideoCallView = {
         try {
             this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             document.getElementById('local-video').srcObject = this.localStream;
-            console.log('[VideoCall] Local media acquired, creating peer (receiver)');
 
             this.peer = new SimplePeer({
                 initiator: false,
@@ -203,11 +173,9 @@ const VideoCallView = {
             });
 
             this.peer.on('signal', (data) => {
+                P2P.sendCallSignal(from, data);
                 if (data.type === 'answer') {
-                    console.log('[VideoCall] Sending answer to', from);
-                    App.socket.emit('call-accepted', { to: from, answer: data });
-                } else if (data.candidate) {
-                    App.socket.emit('ice-candidate', { to: from, candidate: data });
+                    P2P.sendCallAccepted(from);
                 }
             });
 
@@ -227,7 +195,12 @@ const VideoCallView = {
                 App.showView('main');
             });
 
-            this.peer.signal(offer);
+            // Replay any buffered signals (offer + ICE candidates that arrived before accept)
+            console.log('[VideoCall] Replaying', this.pendingSignals.length, 'buffered signals');
+            for (const sig of this.pendingSignals) {
+                this.peer.signal(sig);
+            }
+            this.pendingSignals = [];
         } catch (err) {
             console.error('[VideoCall] Failed to accept call:', err);
             this.endCall();
@@ -236,9 +209,9 @@ const VideoCallView = {
 
     rejectCall() {
         document.getElementById('incoming-call-modal').classList.add('hidden');
-        if (this.incomingOffer) {
-            App.socket.emit('call-rejected', { to: this.incomingOffer.from });
-            this.incomingOffer = null;
+        if (this.currentCallPeerId) {
+            P2P.sendCallRejected(this.currentCallPeerId);
+            this.currentCallPeerId = null;
         }
     },
 
@@ -254,7 +227,6 @@ const VideoCallView = {
 
     async startScreenShare() {
         try {
-            // Use IPC source picker to let user choose what to share
             if (window.electronAPI && window.electronAPI.getDesktopSources) {
                 const sources = await window.electronAPI.getDesktopSources();
                 if (!sources || sources.length === 0) {
@@ -263,7 +235,7 @@ const VideoCallView = {
                 }
 
                 const selectedSource = await this.showScreenPicker(sources);
-                if (!selectedSource) return; // User cancelled
+                if (!selectedSource) return;
 
                 this.screenStream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
@@ -278,7 +250,6 @@ const VideoCallView = {
                     },
                 });
             } else {
-                // Fallback for non-Electron environments
                 this.screenStream = await navigator.mediaDevices.getDisplayMedia({
                     video: { cursor: 'always' },
                 });
@@ -295,17 +266,12 @@ const VideoCallView = {
                 if (sender) sender.replaceTrack(screenTrack);
                 screenTrack.onended = () => this.stopScreenShare();
             }
-
-            if (App.socket && this.currentCallPeerId) {
-                App.socket.emit('screen-share-started', { to: this.currentCallPeerId });
-            }
         } catch (err) {
             console.error('[VideoCall] Screen share failed:', err);
             this.isScreenSharing = false;
         }
     },
 
-    // Show a picker modal for the user to choose which screen/window to share
     showScreenPicker(sources) {
         return new Promise((resolve) => {
             const modal = document.getElementById('screen-picker-modal');
@@ -326,7 +292,6 @@ const VideoCallView = {
                 grid.appendChild(item);
             }
 
-            // Cancel button
             document.getElementById('btn-cancel-screen-pick').onclick = () => {
                 modal.classList.add('hidden');
                 resolve(null);
@@ -354,17 +319,13 @@ const VideoCallView = {
                 if (sender) sender.replaceTrack(cameraTrack);
             }
         }
-
-        if (App.socket && this.currentCallPeerId) {
-            App.socket.emit('screen-share-stopped', { to: this.currentCallPeerId });
-        }
     },
 
     // ── End & Cleanup ────────────────────────────────────────────────
 
     endCall() {
-        if (this.currentCallPeerId && App.socket) {
-            App.socket.emit('end-call', { to: this.currentCallPeerId });
+        if (this.currentCallPeerId) {
+            P2P.sendCallEnded(this.currentCallPeerId);
         }
         this.cleanupCall();
         App.showView('main');
@@ -389,8 +350,8 @@ const VideoCallView = {
         this.isMuted = false;
         this.isCameraOff = false;
         this.isScreenSharing = false;
-        this.incomingOffer = null;
         this.startWithScreenShare = false;
+        this.pendingSignals = [];
 
         document.getElementById('incoming-call-modal').classList.add('hidden');
 

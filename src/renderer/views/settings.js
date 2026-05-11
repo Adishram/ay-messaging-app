@@ -8,7 +8,8 @@ const SettingsView = {
 
         document.getElementById('btn-save-name').addEventListener('click', () => this.saveName());
         document.getElementById('btn-delete-account').addEventListener('click', () => this.deleteAccount());
-        document.getElementById('btn-copy-conn').addEventListener('click', () => this.copyConnString());
+        document.getElementById('btn-copy-userid').addEventListener('click', () => this.copyUserId());
+        document.getElementById('btn-reveal-mnemonic').addEventListener('click', () => this.toggleMnemonic());
     },
 
     loadData() {
@@ -16,11 +17,17 @@ const SettingsView = {
         if (!id) return;
         
         document.getElementById('settings-name').value = id.profile.name !== 'Anonymous' ? id.profile.name : '';
-        document.getElementById('settings-conn-string').value = makeConnectionString(id);
+        
+        // Show User ID (full hex, formatted)
+        document.getElementById('settings-userid').value = id.pubKeyHex;
+        
+        // Hide mnemonic by default
+        document.getElementById('settings-mnemonic').classList.add('hidden');
+        document.getElementById('btn-reveal-mnemonic').textContent = 'Reveal';
         
         document.getElementById('name-status').textContent = '';
         document.getElementById('delete-status').textContent = '';
-        document.getElementById('conn-status').textContent = '';
+        document.getElementById('userid-status').textContent = '';
     },
 
     async saveName() {
@@ -33,7 +40,7 @@ const SettingsView = {
 
         try {
             await updateIdentityProfile({ name: newName });
-            App.currentUser = await getOrCreateIdentity(); // Refresh
+            App.currentUser = await getStoredIdentity();
             App.updateUserUI();
             this.showStatus('name-status', 'Name updated successfully', 'success');
         } catch (error) {
@@ -45,15 +52,38 @@ const SettingsView = {
         }
     },
 
-    async copyConnString() {
-        const input = document.getElementById('settings-conn-string');
+    async copyUserId() {
+        const input = document.getElementById('settings-userid');
         input.select();
         input.setSelectionRange(0, 99999);
         navigator.clipboard.writeText(input.value);
-        this.showStatus('conn-status', 'Copied to clipboard!', 'success');
+        this.showStatus('userid-status', 'Copied to clipboard!', 'success');
         setTimeout(() => {
-            document.getElementById('conn-status').textContent = '';
+            document.getElementById('userid-status').textContent = '';
         }, 2000);
+    },
+
+    toggleMnemonic() {
+        const container = document.getElementById('settings-mnemonic');
+        const btn = document.getElementById('btn-reveal-mnemonic');
+        
+        if (container.classList.contains('hidden')) {
+            // Show mnemonic
+            const words = App.currentUser.mnemonic;
+            container.innerHTML = '';
+            words.forEach((word, i) => {
+                const span = document.createElement('span');
+                span.className = 'mnemonic-word';
+                span.innerHTML = `<small>${i + 1}</small>${word}`;
+                container.appendChild(span);
+            });
+            container.classList.remove('hidden');
+            btn.textContent = 'Hide';
+        } else {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            btn.textContent = 'Reveal';
+        }
     },
 
     async deleteAccount() {
@@ -66,12 +96,13 @@ const SettingsView = {
         btn.disabled = true;
 
         try {
-            P2P.teardown();
+            await P2P.teardown();
             await clearIdentity();
             await clearAllData();
             
             App.currentUser = null;
-            document.getElementById('setup-error').textContent = 'Account deleted successfully.';
+            App.onlineUsers = new Set();
+            AuthView.resetUI();
             App.showView('auth');
             
         } catch (error) {

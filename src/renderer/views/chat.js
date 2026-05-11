@@ -2,7 +2,7 @@
 
 const ChatView = {
     currentConversation: null,
-    currentPeer: null, // The contact object { pubKeyHex, profile }
+    currentPeer: null,
     pendingFile: null,
     typingTimeout: null,
     searchActive: false,
@@ -15,7 +15,6 @@ const ChatView = {
         P2P.onReceipt = (data) => this.handleReceipt(data);
         P2P.onTyping = (data) => this.handleTyping(data);
         P2P.onPeerProfile = async (data) => {
-            // Profile updated, reload contacts UI
             await ContactsView.loadContacts();
             await ContactsView.loadConversations();
             if (this.currentPeer && this.currentPeer.pubKeyHex === data.pubKeyHex) {
@@ -24,12 +23,10 @@ const ChatView = {
             }
         };
 
-        // File transfer completion from fileTransfer.js
         window.addEventListener('file-received', (e) => this.handleFileReceived(e.detail));
     },
 
     setupEventListeners() {
-        // Input handling
         const input = document.getElementById('message-input');
         input.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -50,43 +47,34 @@ const ChatView = {
 
         document.getElementById('btn-send').addEventListener('click', () => this.handleSend());
 
-        // File constraints & UI
+        // File input — instant (no delay)
         const fileInput = document.getElementById('file-input');
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
-            if (file) {
-                // 100MB limit for reliable data channel chunking
-                if (file.size > 100 * 1024 * 1024) {
-                    alert('File too large (max 100MB)');
-                    e.target.value = '';
-                    return;
-                }
-                this.pendingFile = file;
-                document.getElementById('file-preview-name').textContent = file.name;
-                document.getElementById('file-preview-size').textContent = (file.size / 1024 / 1024).toFixed(2) + ' MB';
-                document.getElementById('file-preview-bar').classList.remove('hidden');
-                input.focus();
+            if (!file) return;
+            if (file.size > 100 * 1024 * 1024) {
+                alert('File too large (max 100MB)');
+                e.target.value = '';
+                return;
             }
+            this.pendingFile = file;
+            document.getElementById('file-preview-name').textContent = file.name;
+            document.getElementById('file-preview-size').textContent = this.formatFileSize(file.size);
+            document.getElementById('file-preview-bar').classList.remove('hidden');
+            input.focus();
         });
 
         document.getElementById('btn-attach').addEventListener('click', () => fileInput.click());
         document.getElementById('btn-remove-file').addEventListener('click', () => this.clearPendingFile());
 
         // Header controls
-        document.getElementById('btn-video-call').addEventListener('click', async () => {
-            if (this.currentPeer) {
-                // We reuse Socket.io signaling from videoCall.js (which remains)
-                VideoCallView.startCall(this.currentPeer.pubKeyHex, this.currentPeer.profile.name, false);
-            }
+        document.getElementById('btn-video-call').addEventListener('click', () => {
+            if (this.currentPeer) VideoCallView.startCall(this.currentPeer.pubKeyHex, this.currentPeer.profile.name, false);
         });
-        
         document.getElementById('btn-screen-share-chat').addEventListener('click', () => {
-            if (this.currentPeer) {
-                VideoCallView.startCall(this.currentPeer.pubKeyHex, this.currentPeer.profile.name, true);
-            }
+            if (this.currentPeer) VideoCallView.startCall(this.currentPeer.pubKeyHex, this.currentPeer.profile.name, true);
         });
 
-        // Search in chat
         document.getElementById('btn-search-messages').addEventListener('click', () => this.toggleSearch());
         document.getElementById('btn-close-search').addEventListener('click', () => this.toggleSearch());
         document.getElementById('search-messages-input').addEventListener('input', (e) => this.performSearch(e.target.value));
@@ -110,7 +98,6 @@ const ChatView = {
         document.getElementById('chat-messages').classList.remove('hidden');
         document.getElementById('chat-input').classList.remove('hidden');
 
-        // Render header
         document.getElementById('chat-peer-name').textContent = peerContact.profile.name;
         const avatarEl = document.getElementById('chat-peer-avatar');
         avatarEl.style.backgroundColor = peerContact.profile.avatarColor;
@@ -118,15 +105,13 @@ const ChatView = {
         
         this.updateHeaderStatus();
 
-        // Connect data channel if not connected
-        if (!P2P.isPeerConnected(peerContact.pubKeyHex)) {
-            P2P.connectToPeer(peerContact.pubKeyHex).catch(e => console.error('P2P connect dev:', e));
+        const isConnected = await P2P.isPeerConnected(peerContact.pubKeyHex);
+        if (!isConnected) {
+            P2P.connectToPeer(peerContact.pubKeyHex).catch(() => {});
         }
 
         document.getElementById('chat-messages').innerHTML = '';
         await this.loadMessages();
-        
-        // Focus input
         setTimeout(() => document.getElementById('message-input').focus(), 100);
     },
 
@@ -134,14 +119,8 @@ const ChatView = {
         if (!this.currentPeer) return;
         const statusEl = document.getElementById('chat-peer-status');
         const isOnline = App.onlineUsers.has(this.currentPeer.pubKeyHex);
-        
-        if (isOnline) {
-            statusEl.textContent = 'Online';
-            statusEl.classList.add('online');
-        } else {
-            statusEl.textContent = 'Offline';
-            statusEl.classList.remove('online');
-        }
+        statusEl.textContent = isOnline ? 'Online' : 'Offline';
+        statusEl.classList.toggle('online', isOnline);
     },
 
     async loadMessages() {
@@ -152,7 +131,6 @@ const ChatView = {
         container.innerHTML = '';
 
         let currentDate = null;
-
         msgs.forEach(msg => {
             const msgDate = new Date(msg.timestamp).toISOString().split('T')[0];
             if (msgDate !== currentDate) {
@@ -170,77 +148,81 @@ const ChatView = {
         const text = input.value.trim();
         
         if (!text && !this.pendingFile) return;
-
         input.value = '';
+
+        // Handle file send
         if (this.pendingFile) {
-            const peerObj = P2P.getPeer(this.currentPeer.pubKeyHex);
-            if (peerObj && peerObj.connected) {
-                // Send file via connection
-                this.renderLocalFileMessage(this.pendingFile);
-                sendFileP2P(peerObj, this.pendingFile, (progress) => {
-                    // Could update progress bar UI here
-                }).catch(err => console.error('File send error:', err));
-            } else {
-                alert('Peer is offline, cannot send file via P2P.');
-            }
+            const file = this.pendingFile;
             this.clearPendingFile();
-            P2P.sendTyping(this.currentPeer.pubKeyHex, false);
-            return;
+            
+            try {
+                await FileTransfer.sendFile(this.currentPeer.pubKeyHex, file);
+                const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, this.currentPeer.pubKeyHex);
+                const fileUrl = URL.createObjectURL(file);
+                const isImg = file.type.startsWith('image/');
+                const isVid = file.type.startsWith('video/');
+                let contentHtml = `<a href="${fileUrl}" download="${file.name}" class="file-attachment text-preview">📄 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) - Click to download</a>`;
+                if (isImg) contentHtml = `<a href="${fileUrl}" download="${file.name}"><img src="${fileUrl}" class="file-attachment image-preview" style="max-width: 200px; border-radius: 8px;"></a>`;
+                if (isVid) contentHtml = `<video src="${fileUrl}" controls class="file-attachment video-preview" style="max-width: 200px; border-radius: 8px;"></video>`;
+
+                await saveMessage({
+                    id: crypto.randomUUID(),
+                    conversationId: conv.id,
+                    senderId: App.currentUser.pubKeyHex,
+                    content: contentHtml,
+                    timestamp: Date.now(),
+                    status: 'sent',
+                    type: 'html',
+                });
+                await this.loadMessages();
+                ContactsView.loadConversations();
+            } catch (err) {
+                console.error('File send failed:', err);
+            }
+
+            // Also send the text if there was one
+            if (!text) return;
         }
 
-        // Just Text Message
         if (!text) return;
 
         try {
-            // Optimistic render (will show sending status if we want, but local store is fast)
-            const { msgId, timestamp } = await P2P.sendMessage(this.currentPeer.pubKeyHex, text);
-            
+            await P2P.sendMessage(this.currentPeer.pubKeyHex, text);
             P2P.sendTyping(this.currentPeer.pubKeyHex, false);
-            
-            // Re-render
             await this.loadMessages();
-            ContactsView.loadConversations(); // Update side bar preview
+            ContactsView.loadConversations();
         } catch (error) {
             console.error('Send message failed:', error);
-            // Even if failed to send (offline), the message should be persisted as 'failed' status ideally
-            alert('Cannot send message. User might be offline.');
         }
     },
 
-    renderLocalFileMessage(file) {
-        // Construct a fake msg block for local optimistic render of file
-        const container = document.getElementById('chat-messages');
-        const msgInfo = {
-            id: crypto.randomUUID(),
-            senderId: App.currentUser.pubKeyHex,
-            content: `Sent file: ${file.name}`,
-            timestamp: Date.now(),
-            status: 'sent',
-            type: 'text' // For simplicity right now
-        };
-        container.appendChild(this.createMessageElement(msgInfo));
-        this.scrollToBottom();
-    },
-
     handleIncomingMessage(data) {
-        // data: { remotePubKeyHex, plaintext, msgId, timestamp, conversationId }
-        ContactsView.loadConversations(); // Update preview
+        ContactsView.loadConversations();
         
-        // If we have chat open for this conversation, append
-        if (this.currentConversation && this.currentConversation.id === data.conversationId) {
-            this.loadMessages(); // Just full reload to keep date dividers clean
+        // Show notification if not viewing this conversation
+        const isActive = this.currentConversation && this.currentConversation.id === data.conversationId;
+        
+        if (isActive) {
+            this.loadMessages();
+        }
+
+        // Always show notification unless it's the active conversation
+        if (!isActive || !document.hasFocus()) {
+            const contact = ContactsView.contacts.find(c => c.pubKeyHex === data.remotePubKeyHex);
+            const senderName = contact ? contact.profile.name : 'New message';
+            const preview = data.plaintext.length > 60 ? data.plaintext.slice(0, 60) + '…' : data.plaintext;
+            
+            if (window.electronAPI) {
+                window.electronAPI.showNotification(senderName, preview);
+            }
         }
     },
 
     handleFileReceived(fileMeta) {
-        // We received a file chunk entirely -> blob
         const { from, name, size, mimeType, url } = fileMeta;
         ContactsView.loadConversations(); 
         
         if (this.currentPeer && this.currentPeer.pubKeyHex === from) {
-            const container = document.getElementById('chat-messages');
-            
-            // Create a fake msg
             const isImg = mimeType.startsWith('image/');
             const isVid = mimeType.startsWith('video/');
             
@@ -248,7 +230,6 @@ const ChatView = {
             if (isImg) contentHtml = `<a href="${url}" download="${name}"><img src="${url}" class="file-attachment image-preview" style="max-width: 200px; border-radius: 8px;"></a>`;
             if (isVid) contentHtml = `<video src="${url}" controls class="file-attachment video-preview" style="max-width: 200px; border-radius: 8px;"></video>`;
 
-            // Write to local DB as a mock message to keep history
             saveMessage({
                 id: crypto.randomUUID(),
                 senderId: from,
@@ -261,13 +242,23 @@ const ChatView = {
 
             this.loadMessages();
         }
+
+        // Notification for file
+        if (!this.currentPeer || this.currentPeer.pubKeyHex !== from || !document.hasFocus()) {
+            const contact = ContactsView.contacts.find(c => c.pubKeyHex === from);
+            const senderName = contact ? contact.profile.name : 'Someone';
+            if (window.electronAPI) {
+                window.electronAPI.showNotification(senderName, `📎 Sent a file: ${name}`);
+            }
+        }
     },
 
+
+
     handleReceipt(data) {
-        // Update checkmarks
-        const uiStatus = document.getElementById(`status-${data.msgId}`);
-        if (uiStatus) {
-            if (data.status === 'delivered') uiStatus.innerHTML = '<path d="M5 13l4 4L19 7"/><path d="M10 13l4 4L24 7"/>'; // double tick
+        const svg = document.getElementById(`status-${data.msgId}`);
+        if (svg && data.status === 'delivered') {
+            svg.classList.add('status-read');
         }
     },
 
@@ -292,18 +283,14 @@ const ChatView = {
 
         let statusHtml = '';
         if (isSelf) {
-            if (msg.status === 'sent') {
-                statusHtml = `<svg id="status-${msg.id}" class="message-status" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>`; // single tick
-            } else if (msg.status === 'delivered') {
-                statusHtml = `<svg id="status-${msg.id}" class="message-status status-read" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/><path d="M10 13l4 4L24 7" opacity="0.5"/></svg>`; // double tick
-            }
+            const statusClass = msg.status === 'delivered' ? 'status-read' : '';
+            statusHtml = `<svg id="status-${msg.id}" class="message-status ${statusClass}" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M5 13l4 4L19 7"/></svg>`;
         }
 
-        // Handle HTML injection from files vs pure text (escaped)
         let msgContent = msg.type === 'html' ? msg.content : this.escapeHtml(msg.content);
 
         el.innerHTML = `
-            <div class="message-bubble glass-panel">
+            <div class="message-bubble">
                 <div class="message-content">${msgContent}</div>
                 <div class="message-meta">
                     <span class="message-time">${timeStr}</span>
@@ -337,9 +324,13 @@ const ChatView = {
 
     scrollToBottom() {
         const msgsEl = document.getElementById('chat-messages');
-        requestAnimationFrame(() => {
-            msgsEl.scrollTop = msgsEl.scrollHeight;
-        });
+        requestAnimationFrame(() => { msgsEl.scrollTop = msgsEl.scrollHeight; });
+    },
+
+    formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
     },
 
     escapeHtml(str) {
@@ -349,7 +340,6 @@ const ChatView = {
         return div.innerHTML;
     },
 
-    // ── Search functionality ────────────────────────────────────
     toggleSearch() {
         this.searchActive = !this.searchActive;
         const panel = document.getElementById('search-panel');
@@ -371,23 +361,12 @@ const ChatView = {
         messages.forEach(bubble => {
             const content = bubble.querySelector('.message-content').textContent.toLowerCase();
             const parent = bubble.parentElement;
-            
-            if (term && content.includes(lowerTerm)) {
-                parent.style.display = 'flex';
-                count++;
-            } else if (!term) {
-                parent.style.display = 'flex';
-            } else {
-                parent.style.display = 'none';
-            }
+            if (term && content.includes(lowerTerm)) { parent.style.display = 'flex'; count++; }
+            else if (!term) { parent.style.display = 'flex'; }
+            else { parent.style.display = 'none'; }
         });
 
         const countEl = document.getElementById('search-count');
-        if (term) {
-            countEl.textContent = `${count} matches`;
-        } else {
-            countEl.textContent = '';
-            document.querySelectorAll('.date-divider').forEach(d => d.style.display = 'flex');
-        }
+        countEl.textContent = term ? `${count} matches` : '';
     }
 };
