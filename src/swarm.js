@@ -35,6 +35,10 @@ async function startSwarm(seedArray) {
 
   console.log('[Swarm] Started with pubkey:', myPublicKeyHex.slice(0, 16) + '...');
 
+  // Listen on a local port and announce our public key to the DHT
+  // This is REQUIRED for joinPeer() to work over the internet!
+  await swarm.listen();
+
   // Announce ourselves on a topic derived from our public key
   // so that contacts who know our pubkey can find us
   const selfTopic = crypto.createHash('sha256')
@@ -42,6 +46,7 @@ async function startSwarm(seedArray) {
     .digest();
   
   swarm.join(selfTopic, { server: true, client: false });
+  swarm.flush().catch(err => console.error('DHT flush error:', err));
 
   // Handle incoming connections
   swarm.on('connection', (socket, peerInfo) => {
@@ -107,6 +112,11 @@ async function connectToPeer(remotePubKeyHex) {
   swarm.joinPeer(remotePubKey);
 
   console.log('[Swarm] Looking for peer:', remotePubKeyHex.slice(0, 16) + '...');
+  
+  // Wait for the DHT lookup to complete so that over the internet, 
+  // it has enough time to find the peer and punch holes before returning
+  await swarm.flush();
+  
   return true;
 }
 
