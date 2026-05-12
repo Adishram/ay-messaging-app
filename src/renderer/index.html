@@ -179,6 +179,33 @@
               </div>
             </div>
             <div class="chat-header-actions">
+              <div class="chat-more-wrapper">
+                <button class="btn-icon" id="btn-chat-more" title="More Options">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="5" r="1" fill="currentColor" />
+                    <circle cx="12" cy="12" r="1" fill="currentColor" />
+                    <circle cx="12" cy="19" r="1" fill="currentColor" />
+                  </svg>
+                </button>
+                <div class="chat-dropdown hidden" id="chat-dropdown">
+                  <button class="dropdown-item" id="btn-clear-chat">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                    </svg>
+                    <span>Clear Chat</span>
+                  </button>
+                  <button class="dropdown-item dropdown-item-danger" id="btn-delete-contact-chat">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+                      <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2" />
+                      <circle cx="8.5" cy="7" r="4" />
+                      <line x1="18" y1="8" x2="23" y2="13" />
+                      <line x1="23" y1="8" x2="18" y2="13" />
+                    </svg>
+                    <span>Delete Contact</span>
+                  </button>
+                </div>
+              </div>
               <button class="btn-icon" id="btn-search-messages" title="Search Messages">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="11" cy="11" r="8" />
@@ -333,6 +360,26 @@
         <div class="screen-picker-grid" id="screen-picker-grid"></div>
         <button class="btn-secondary" id="btn-cancel-screen-pick" style="margin-top:12px;width:100%">Cancel</button>
       </div>
+    </div>
+
+    <!-- Contact Context Menu (right-click on contact items) -->
+    <div class="context-menu hidden" id="contact-context-menu">
+      <button class="context-menu-item" id="ctx-clear-chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+        </svg>
+        <span>Clear Chat</span>
+      </button>
+      <button class="context-menu-item context-menu-item-danger" id="ctx-delete-contact">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px">
+          <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2" />
+          <circle cx="8.5" cy="7" r="4" />
+          <line x1="18" y1="8" x2="23" y2="13" />
+          <line x1="23" y1="8" x2="18" y2="13" />
+        </svg>
+        <span>Delete Contact</span>
+      </button>
     </div>
 
     <!-- Add Contact Modal -->

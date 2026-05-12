@@ -78,6 +78,34 @@ const ChatView = {
         document.getElementById('btn-search-messages').addEventListener('click', () => this.toggleSearch());
         document.getElementById('btn-close-search').addEventListener('click', () => this.toggleSearch());
         document.getElementById('search-messages-input').addEventListener('input', (e) => this.performSearch(e.target.value));
+
+        // Chat header dropdown (⋯ More Options)
+        document.getElementById('btn-chat-more').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const dropdown = document.getElementById('chat-dropdown');
+            dropdown.classList.toggle('hidden');
+        });
+
+        document.getElementById('btn-clear-chat').addEventListener('click', () => {
+            document.getElementById('chat-dropdown').classList.add('hidden');
+            if (this.currentPeer) {
+                ContactsView.clearChat(this.currentPeer.pubKeyHex);
+            }
+        });
+
+        document.getElementById('btn-delete-contact-chat').addEventListener('click', () => {
+            document.getElementById('chat-dropdown').classList.add('hidden');
+            if (this.currentPeer) {
+                ContactsView.deleteContactFull(this.currentPeer.pubKeyHex);
+            }
+        });
+
+        // Close dropdown on click elsewhere
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.chat-more-wrapper')) {
+                document.getElementById('chat-dropdown').classList.add('hidden');
+            }
+        });
     },
 
     showEmptyState() {

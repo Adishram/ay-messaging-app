@@ -26,7 +26,13 @@
         "zip",
         "dmg"
       ],
-      "identity": null
+      "identity": null,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "A&Y needs camera access for video calls.",
+        "NSMicrophoneUsageDescription": "A&Y needs microphone access for video and audio calls."
+      }
     },
     "win": {
       "target": "nsis",

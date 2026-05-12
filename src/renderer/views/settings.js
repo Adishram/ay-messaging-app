@@ -96,9 +96,12 @@ const SettingsView = {
         btn.disabled = true;
 
         try {
+            // Tear down P2P network
             await P2P.teardown();
-            await clearIdentity();
-            await clearAllData();
+
+            // Destroy databases completely (not just clear)
+            await destroyAppDatabase();
+            await destroyIdentityDatabase();
             
             App.currentUser = null;
             App.onlineUsers = new Set();

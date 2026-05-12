@@ -95,7 +95,7 @@ async function connectToPeer(remotePubKeyHex) {
   if (!swarm) throw new Error('Swarm not initialized');
   if (connections.has(remotePubKeyHex)) {
     console.log('[Swarm] Already connected to', remotePubKeyHex.slice(0, 16));
-    return true;
+    return { status: 'connected' };
   }
 
   const remotePubKey = b4a.from(remotePubKeyHex, 'hex');
@@ -113,11 +113,29 @@ async function connectToPeer(remotePubKeyHex) {
 
   console.log('[Swarm] Looking for peer:', remotePubKeyHex.slice(0, 16) + '...');
   
-  // Wait for the DHT lookup to complete so that over the internet, 
-  // it has enough time to find the peer and punch holes before returning
-  await swarm.flush();
-  
-  return true;
+  // Wait for the DHT lookup with a 30-second timeout
+  // Over the internet, hole-punching can take time or fail silently
+  const CONNECT_TIMEOUT_MS = 30000;
+
+  try {
+    await Promise.race([
+      swarm.flush(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timed out')), CONNECT_TIMEOUT_MS)
+      ),
+    ]);
+  } catch (err) {
+    console.warn('[Swarm] Flush timeout/error for peer:', remotePubKeyHex.slice(0, 16), err.message);
+  }
+
+  // Check if we actually connected during the flush
+  if (connections.has(remotePubKeyHex)) {
+    return { status: 'connected' };
+  }
+
+  // Not connected yet — peer may come online later
+  console.log('[Swarm] Peer not found yet, will keep trying in background:', remotePubKeyHex.slice(0, 16));
+  return { status: 'pending' };
 }
 
 async function disconnectPeer(remotePubKeyHex) {

@@ -174,6 +174,27 @@ async function clearAllData() {
   ));
 }
 
+// Completely destroy the database (for full account wipe)
+async function destroyAppDatabase() {
+  // Close the existing connection first
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(APP_DB_NAME);
+    req.onsuccess = () => {
+      console.log('[LocalDB] Database destroyed');
+      resolve();
+    };
+    req.onerror = (e) => reject(e.target.error);
+    req.onblocked = () => {
+      console.warn('[LocalDB] Database deletion blocked, forcing...');
+      resolve(); // proceed anyway
+    };
+  });
+}
+
 // ── IDB helpers ───────────────────────────────────────────────────────────────
 
 function idbGet(db, store, key) {

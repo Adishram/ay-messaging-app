@@ -8,6 +8,10 @@ module.exports = {
         appBundleId: 'com.ay.videocall',
         appCategoryType: 'public.app-category.social-networking',
         darwinDarkModeSupport: true,
+        osxSign: {
+            entitlements: 'build/entitlements.mac.plist',
+            'entitlements-inherit': 'build/entitlements.mac.plist',
+        },
     },
     makers: [
         {

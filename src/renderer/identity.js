@@ -191,6 +191,28 @@ async function clearIdentity() {
   });
 }
 
+// Completely destroy the identity database (full wipe)
+async function destroyIdentityDatabase() {
+  // Close any existing connection
+  try {
+    const db = await openIdentityDB();
+    db.close();
+  } catch (_) {}
+  
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(ID_DB_NAME);
+    req.onsuccess = () => {
+      console.log('[Identity] Database destroyed');
+      resolve();
+    };
+    req.onerror = (e) => reject(e.target.error);
+    req.onblocked = () => {
+      console.warn('[Identity] Database deletion blocked, forcing...');
+      resolve();
+    };
+  });
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 const bufToHex    = b => [...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join('');

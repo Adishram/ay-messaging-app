@@ -40,7 +40,28 @@ const ContactsView = {
         document.getElementById('add-contact-id').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.addContact();
         });
+
+        // Context menu: clear chat action
+        document.getElementById('ctx-clear-chat').addEventListener('click', () => {
+            this.hideContextMenu();
+            if (this._contextTarget) this.clearChat(this._contextTarget);
+        });
+
+        // Context menu: delete contact action
+        document.getElementById('ctx-delete-contact').addEventListener('click', () => {
+            this.hideContextMenu();
+            if (this._contextTarget) this.deleteContactFull(this._contextTarget);
+        });
+
+        // Close context menu on click elsewhere
+        document.addEventListener('click', () => this.hideContextMenu());
+        document.addEventListener('contextmenu', (e) => {
+            // Only keep context menu open if right-clicking on a contact item
+            if (!e.target.closest('.contact-item')) this.hideContextMenu();
+        });
     },
+
+    _contextTarget: null,
 
     async loadConversations() {
         try {
@@ -87,17 +108,19 @@ const ContactsView = {
         errorEl.textContent = '';
 
         try {
-            // Connect via Hyperswarm DHT
-            await P2P.connectToPeer(pubKeyHex);
+            // Connect via Hyperswarm DHT (now has a 30s timeout)
+            const result = await P2P.connectToPeer(pubKeyHex);
             
-            // Wait a bit for profile exchange
-            await new Promise(res => setTimeout(res, 3000));
+            if (result && result.status === 'connected') {
+                // Connected — wait a moment for profile exchange
+                await new Promise(res => setTimeout(res, 2000));
+            }
             
             // Check if contact was added (P2P layer upserts it when profile received)
             let contact = await getContact(pubKeyHex);
             
             if (!contact) {
-                // Not online immediately, add placeholder
+                // Peer not online or profile not received yet — add placeholder
                 contact = {
                     pubKeyHex,
                     profile: { name: 'Unknown User', avatarColor: '#9e9e9e' }
@@ -119,9 +142,17 @@ const ContactsView = {
             document.querySelector('[data-panel="conversations"]').click();
             ChatView.openConversation(conv, contact);
 
+            // If the peer wasn't connected, show a subtle notification
+            if (!result || result.status === 'pending') {
+                window.electronAPI?.showNotification(
+                    'Contact Added',
+                    'They appear to be offline. Messages will be delivered when they come online.'
+                );
+            }
+
         } catch (error) {
             console.error('Add contact failed:', error);
-            errorEl.textContent = 'Failed to connect. Make sure the ID is correct.';
+            errorEl.textContent = 'Failed to connect. Make sure the ID is correct and try again.';
         } finally {
             btn.innerHTML = '<span>Connect</span>';
             btn.disabled = false;
@@ -161,6 +192,12 @@ const ContactsView = {
                 this.conversations.find(c => c.id === conv.id), 
                 this.contacts.find(c => c.pubKeyHex === conv.peerPubKeyHex)
             );
+
+            item.oncontextmenu = (e) => {
+                e.preventDefault();
+                this._contextTarget = conv.peerPubKeyHex;
+                this.showContextMenu(e.clientX, e.clientY);
+            };
 
             item.innerHTML = `
                 <div class="contact-avatar" style="background-color: ${conv.peerProfile.avatarColor}">
@@ -204,6 +241,12 @@ const ContactsView = {
                 ChatView.openConversation(conv, contact);
             };
 
+            item.oncontextmenu = (e) => {
+                e.preventDefault();
+                this._contextTarget = contact.pubKeyHex;
+                this.showContextMenu(e.clientX, e.clientY);
+            };
+
             item.innerHTML = `
                 <div class="contact-avatar" style="background-color: ${contact.profile.avatarColor}">
                     ${initials}
@@ -242,5 +285,79 @@ const ContactsView = {
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
+    },
+
+    // ── Context Menu Helpers ───────────────────────────────────────
+
+    showContextMenu(x, y) {
+        const menu = document.getElementById('contact-context-menu');
+        menu.classList.remove('hidden');
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+
+        // Keep menu inside the window
+        requestAnimationFrame(() => {
+            const rect = menu.getBoundingClientRect();
+            if (rect.right > window.innerWidth) {
+                menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+            }
+            if (rect.bottom > window.innerHeight) {
+                menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+            }
+        });
+    },
+
+    hideContextMenu() {
+        document.getElementById('contact-context-menu').classList.add('hidden');
+    },
+
+    async clearChat(pubKeyHex) {
+        if (!confirm('Clear all messages with this contact? This cannot be undone.')) return;
+
+        try {
+            const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, pubKeyHex);
+            await deleteAllMessages(conv.id);
+            await updateConversationPreview(conv.id, '');
+
+            // If we're currently viewing this chat, reload it
+            if (ChatView.currentConversation && ChatView.currentConversation.id === conv.id) {
+                await ChatView.loadMessages();
+            }
+            await this.loadConversations();
+        } catch (err) {
+            console.error('Clear chat failed:', err);
+        }
+    },
+
+    async deleteContactFull(pubKeyHex) {
+        const contact = this.contacts.find(c => c.pubKeyHex === pubKeyHex);
+        const name = contact ? contact.profile.name : 'this contact';
+
+        if (!confirm(`Delete ${name} and all messages? This cannot be undone.`)) return;
+
+        try {
+            // Delete messages and conversation
+            const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, pubKeyHex);
+            await deleteAllMessages(conv.id);
+            await deleteConversation(conv.id);
+
+            // Delete the contact
+            await deleteContact(pubKeyHex);
+
+            // Disconnect from swarm
+            try {
+                await window.electronAPI.swarmConnectPeer(pubKeyHex); // noop if not connected
+            } catch (_) {}
+
+            // If we're viewing this contact's chat, reset to empty
+            if (ChatView.currentPeer && ChatView.currentPeer.pubKeyHex === pubKeyHex) {
+                ChatView.showEmptyState();
+            }
+
+            await this.loadContacts();
+            await this.loadConversations();
+        } catch (err) {
+            console.error('Delete contact failed:', err);
+        }
     }
 };

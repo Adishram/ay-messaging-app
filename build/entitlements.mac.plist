@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Allow outgoing network connections (DHT lookups, peer discovery) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Allow incoming network connections (hole-punched peer connections) -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <!-- Allow microphone access for video calls -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <!-- Allow camera access for video calls -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+</dict>
+</plist>
