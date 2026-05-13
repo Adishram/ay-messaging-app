@@ -70,9 +70,17 @@ const ChatView = {
 
         // Header controls
         document.getElementById('btn-video-call').addEventListener('click', () => {
+            if (VideoCallView.peer || VideoCallView.localStream || VideoCallView.currentCallPeerId) {
+                window.electronAPI?.showNotification('Busy', 'You are already in a call.');
+                return;
+            }
             if (this.currentPeer) VideoCallView.startCall(this.currentPeer.pubKeyHex, this.currentPeer.profile.name, false);
         });
         document.getElementById('btn-screen-share-chat').addEventListener('click', () => {
+            if (VideoCallView.peer || VideoCallView.localStream || VideoCallView.currentCallPeerId) {
+                window.electronAPI?.showNotification('Busy', 'You are already in a call.');
+                return;
+            }
             if (this.currentPeer) VideoCallView.startCall(this.currentPeer.pubKeyHex, this.currentPeer.profile.name, true);
         });
 

@@ -10,6 +10,15 @@ const SettingsView = {
         document.getElementById('btn-delete-account').addEventListener('click', () => this.deleteAccount());
         document.getElementById('btn-copy-userid').addEventListener('click', () => this.copyUserId());
         document.getElementById('btn-reveal-mnemonic').addEventListener('click', () => this.toggleMnemonic());
+        document.getElementById('btn-copy-mnemonic-settings').addEventListener('click', () => {
+            if (App.currentUser && App.currentUser.mnemonic) {
+                const text = App.currentUser.mnemonic.join(' ');
+                navigator.clipboard.writeText(text);
+                const btn = document.getElementById('btn-copy-mnemonic-settings');
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy Words', 2000);
+            }
+        });
     },
 
     loadData() {
@@ -66,6 +75,7 @@ const SettingsView = {
     toggleMnemonic() {
         const container = document.getElementById('settings-mnemonic');
         const btn = document.getElementById('btn-reveal-mnemonic');
+        const copyBtn = document.getElementById('btn-copy-mnemonic-settings');
         
         if (container.classList.contains('hidden')) {
             // Show mnemonic
@@ -78,9 +88,11 @@ const SettingsView = {
                 container.appendChild(span);
             });
             container.classList.remove('hidden');
+            copyBtn.classList.remove('hidden');
             btn.textContent = 'Hide';
         } else {
             container.classList.add('hidden');
+            copyBtn.classList.add('hidden');
             container.innerHTML = '';
             btn.textContent = 'Reveal';
         }

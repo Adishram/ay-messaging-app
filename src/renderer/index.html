@@ -430,7 +430,10 @@
             <h3>Recovery Phrase</h3>
             <p>These 8 words are the only way to recover your account. Keep them safe.</p>
             <div id="settings-mnemonic" class="mnemonic-grid hidden" style="margin-top: 8px;"></div>
-            <button class="btn-secondary" id="btn-reveal-mnemonic" style="margin-top: 8px;">Reveal</button>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+              <button class="btn-secondary" id="btn-reveal-mnemonic">Reveal</button>
+              <button class="btn-secondary hidden" id="btn-copy-mnemonic-settings">Copy Words</button>
+            </div>
           </div>
 
           <!-- Display Name -->

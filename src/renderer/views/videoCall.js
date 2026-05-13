@@ -34,7 +34,7 @@ const VideoCallView = {
     // Called by P2P when a call-request message arrives
     handleIncomingCall(from, callerName) {
         console.log('[VideoCall] Incoming call from:', callerName);
-        if (this.peer) {
+        if (this.peer || this.localStream || this.currentCallPeerId) {
             P2P.sendCallBusy(from);
             return;
         }
