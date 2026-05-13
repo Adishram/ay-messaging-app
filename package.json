@@ -1,17 +1,24 @@
 {
   "name": "ay-facetime",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "FaceTime-like video calling & messaging app for macOS",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "make": "electron-forge make",
-    "dist": "electron-builder --mac",
+    "dist": "electron-builder --mac --x64 --arm64",
     "dist:win": "electron-builder --win"
   },
   "build": {
     "appId": "com.adishram.aymessaging",
     "productName": "A&Y",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Adishram",
+        "repo": "ay-messaging-app"
+      }
+    ],
     "files": [
       "src/**/*",
       "package.json",
@@ -23,8 +30,20 @@
     "mac": {
       "category": "public.app-category.social-networking",
       "target": [
-        "zip",
-        "dmg"
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "identity": null,
       "entitlements": "build/entitlements.mac.plist",
@@ -62,6 +81,7 @@
   },
   "dependencies": {
     "b4a": "^1.6.6",
+    "electron-updater": "^6.8.3",
     "hypercore-crypto": "^3.4.2",
     "hyperswarm": "^4.17.0",
     "simple-peer": "^9.11.1"

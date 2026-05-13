@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, Notification, desktopCapturer, session, shell, safeStorage, systemPreferences } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const SwarmManager = require('./swarm');
 
@@ -97,6 +98,16 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // ── Auto Updater ────────────────────────────────────────────────
+  autoUpdater.checkForUpdatesAndNotify();
+
+  autoUpdater.on('update-available', () => {
+    console.log('[AutoUpdater] Update available.');
+  });
+  autoUpdater.on('update-downloaded', () => {
+    console.log('[AutoUpdater] Update downloaded; will install on restart.');
+  });
+
   // ── Permission Handling ─────────────────────────────────────────
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
     const allowedPermissions = ['media', 'mediaKeySystem', 'display-capture', 'clipboard-sanitized-write'];
