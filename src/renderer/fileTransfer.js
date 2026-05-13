@@ -3,7 +3,7 @@
 
 const FileTransfer = {
     pendingReceive: new Map(), // fileId → { meta, chunks: [], received: 0 }
-    CHUNK_SIZE: 48 * 1024, // 48KB per chunk (safe for JSON serialization)
+    CHUNK_SIZE: 128 * 1024, // 128KB per chunk (safe and fast with native encoding)
 
     // ── Send a file ─────────────────────────────────────────────────
 
@@ -21,17 +21,13 @@ const FileTransfer = {
             totalChunks,
         });
 
-        // Read and send chunks
-        const arrayBuffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-
+        // Read and send chunks natively using FileReader slices
         for (let i = 0; i < totalChunks; i++) {
             const start = i * this.CHUNK_SIZE;
             const end = Math.min(start + this.CHUNK_SIZE, file.size);
-            const chunk = bytes.slice(start, end);
-
-            // Encode chunk as base64
-            const base64 = this._uint8ToBase64(chunk);
+            const blobSlice = file.slice(start, end);
+            
+            const base64 = await this._readAsBase64(blobSlice);
 
             P2P.sendRaw(remotePubKeyHex, {
                 type: 'file-chunk',
@@ -40,7 +36,12 @@ const FileTransfer = {
                 data: base64,
             });
 
-            // Small delay between chunks to avoid overwhelming the stream
+            // Dispatch progress
+            window.dispatchEvent(new CustomEvent('file-progress', {
+                detail: { fileId, progress: Math.round(((i + 1) / totalChunks) * 100), type: 'upload' }
+            }));
+
+            // Small delay to yield to UI and not choke IPC buffer
             if (i % 5 === 4) {
                 await new Promise(r => setTimeout(r, 10));
             }
@@ -67,12 +68,17 @@ const FileTransfer = {
         });
     },
 
-    handleChunk(remotePubKeyHex, msg) {
+    async handleChunk(remotePubKeyHex, msg) {
         const pending = this.pendingReceive.get(msg.fileId);
         if (!pending) return;
 
-        pending.chunks[msg.index] = this._base64ToUint8(msg.data);
+        pending.chunks[msg.index] = await this._base64ToUint8(msg.data);
         pending.received++;
+
+        // Dispatch progress
+        window.dispatchEvent(new CustomEvent('file-progress', {
+            detail: { fileId: msg.fileId, progress: Math.round((pending.received / pending.meta.totalChunks) * 100), type: 'download' }
+        }));
 
         // Check if complete
         if (pending.received >= pending.meta.totalChunks) {
@@ -80,7 +86,7 @@ const FileTransfer = {
         }
     },
 
-    _assembleFile(fileId, pending) {
+    async _assembleFile(fileId, pending) {
         // Concatenate all chunks
         const totalSize = pending.chunks.reduce((sum, c) => sum + c.length, 0);
         const result = new Uint8Array(totalSize);
@@ -90,9 +96,10 @@ const FileTransfer = {
             offset += chunk.length;
         }
 
-        // Create blob URL
+        // We convert the file directly into a persistent base64 data URL
+        // instead of a temporary blob URL so it saves properly in IndexedDB
         const blob = new Blob([result], { type: pending.meta.mimeType });
-        const url = URL.createObjectURL(blob);
+        const persistentDataUrl = await this._readAsDataURL(blob);
 
         console.log(`[FileTransfer] Assembled ${pending.meta.name} (${totalSize} bytes)`);
 
@@ -103,30 +110,39 @@ const FileTransfer = {
                 name: pending.meta.name,
                 size: pending.meta.size,
                 mimeType: pending.meta.mimeType,
-                url,
+                url: persistentDataUrl, // Persistent data string
             }
         }));
 
         this.pendingReceive.delete(fileId);
     },
 
-    // ── Base64 helpers ───────────────────────────────────────────────
+    // ── Async Base64 helpers ───────────────────────────────────────────────
 
-    _uint8ToBase64(uint8) {
-        let binary = '';
-        for (let i = 0; i < uint8.length; i++) {
-            binary += String.fromCharCode(uint8[i]);
-        }
-        return btoa(binary);
+    async _readAsBase64(blobSlice) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                const base64 = reader.result.split(',')[1];
+                resolve(base64);
+            };
+            reader.readAsDataURL(blobSlice);
+        });
     },
 
-    _base64ToUint8(base64) {
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-        }
-        return bytes;
+    async _readAsDataURL(blob) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
+    },
+
+    async _base64ToUint8(base64) {
+        // Use native fetch to decode base64 extremely fast
+        const res = await fetch(`data:application/octet-stream;base64,${base64}`);
+        const buffer = await res.arrayBuffer();
+        return new Uint8Array(buffer);
     },
 };
 

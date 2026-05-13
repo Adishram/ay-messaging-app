@@ -59,6 +59,11 @@ const ContactsView = {
             // Only keep context menu open if right-clicking on a contact item
             if (!e.target.closest('.contact-item')) this.hideContextMenu();
         });
+
+        // P2P Request Events
+        P2P.onContactRequest = () => this.loadContacts();
+        P2P.onContactAccept = () => { this.loadContacts(); this.loadConversations(); };
+        P2P.onContactDecline = () => this.loadContacts();
     },
 
     _contextTarget: null,
@@ -108,47 +113,29 @@ const ContactsView = {
         errorEl.textContent = '';
 
         try {
-            // Connect via Hyperswarm DHT (now has a 30s timeout)
+            // Connect via Hyperswarm DHT
             const result = await P2P.connectToPeer(pubKeyHex);
             
-            if (result && result.status === 'connected') {
-                // Connected — wait a moment for profile exchange
-                await new Promise(res => setTimeout(res, 2000));
-            }
+            // Send request
+            P2P.sendRaw(pubKeyHex, { type: 'contact-request', profile: App.currentUser.profile });
             
-            // Check if contact was added (P2P layer upserts it when profile received)
-            let contact = await getContact(pubKeyHex);
-            
-            if (!contact) {
-                // Peer not online or profile not received yet — add placeholder
-                contact = {
-                    pubKeyHex,
-                    profile: { name: 'Unknown User', avatarColor: '#9e9e9e' }
-                };
-                await upsertContact(contact);
-            }
-
-            // Create a conversation
-            const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, pubKeyHex);
+            // Save as pending outgoing
+            await upsertContact({
+                pubKeyHex,
+                profile: { name: 'Unknown User', avatarColor: '#9e9e9e' },
+                status: 'pending_outgoing'
+            });
 
             document.getElementById('modal-add-contact').classList.add('hidden');
             document.getElementById('add-contact-id').value = '';
             
             // Reload views
             await this.loadContacts();
-            await this.loadConversations();
             
-            // Switch to chats tab
-            document.querySelector('[data-panel="conversations"]').click();
-            ChatView.openConversation(conv, contact);
-
-            // If the peer wasn't connected, show a subtle notification
-            if (!result || result.status === 'pending') {
-                window.electronAPI?.showNotification(
-                    'Contact Added',
-                    'They appear to be offline. Messages will be delivered when they come online.'
-                );
-            }
+            window.electronAPI?.showNotification(
+                'Request Sent',
+                'A connection request has been sent.'
+            );
 
         } catch (error) {
             console.error('Add contact failed:', error);
@@ -220,16 +207,62 @@ const ContactsView = {
         const listEl = document.getElementById('contact-list');
         listEl.innerHTML = '';
 
-        const filtered = this.contacts.filter(contact => 
+        const allContacts = this.contacts.filter(contact => 
             contact.profile.name.toLowerCase().includes(filterText.toLowerCase())
         );
 
-        if (filtered.length === 0) {
+        const approved = allContacts.filter(c => c.status === 'approved' || !c.status);
+        const incoming = allContacts.filter(c => c.status === 'pending_incoming');
+        const outgoing = allContacts.filter(c => c.status === 'pending_outgoing');
+
+        if (incoming.length > 0) {
+            const header = document.createElement('div');
+            header.innerHTML = `<h4 style="padding: 10px 16px; margin: 0; color: var(--primary); font-size: 12px; text-transform: uppercase;">Pending Requests</h4>`;
+            listEl.appendChild(header);
+
+            incoming.forEach(contact => {
+                const item = document.createElement('div');
+                item.className = `contact-item request-item`;
+                item.innerHTML = `
+                    <div class="contact-avatar" style="background-color: ${contact.profile.avatarColor}">${this.getInitials(contact.profile.name)}</div>
+                    <div class="contact-info" style="flex:1;">
+                        <span class="contact-name">${this.escapeHtml(contact.profile.name)}</span>
+                        <span class="contact-preview">Wants to connect</span>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn-primary btn-sm accept-btn" style="padding: 4px 8px; font-size:11px;">Accept</button>
+                        <button class="btn-secondary btn-sm decline-btn" style="padding: 4px 8px; font-size:11px;">Decline</button>
+                    </div>
+                `;
+                
+                item.querySelector('.accept-btn').onclick = async (e) => {
+                    e.stopPropagation();
+                    P2P.sendRaw(contact.pubKeyHex, { type: 'contact-accept', profile: App.currentUser.profile });
+                    await updateContactStatus(contact.pubKeyHex, 'approved');
+                    this.loadContacts();
+                };
+                
+                item.querySelector('.decline-btn').onclick = async (e) => {
+                    e.stopPropagation();
+                    P2P.sendRaw(contact.pubKeyHex, { type: 'contact-decline' });
+                    await deleteContact(contact.pubKeyHex);
+                    this.loadContacts();
+                };
+
+                listEl.appendChild(item);
+            });
+        }
+
+        if (approved.length > 0) {
+            const header = document.createElement('div');
+            header.innerHTML = `<h4 style="padding: 10px 16px; margin: 0; color: var(--text-secondary); font-size: 12px; text-transform: uppercase;">Contacts</h4>`;
+            listEl.appendChild(header);
+        } else if (incoming.length === 0 && outgoing.length === 0) {
             listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 13px;">No contacts found</div>';
             return;
         }
 
-        filtered.forEach(contact => {
+        approved.forEach(contact => {
             const isOnline = App.onlineUsers.has(contact.pubKeyHex);
             const initials = this.getInitials(contact.profile.name);
 

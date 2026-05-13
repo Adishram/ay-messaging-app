@@ -38,8 +38,23 @@ async function openDB() {
 // ── Contacts (replaces Appwrite `users` collection) ──────────────────────────
 
 async function upsertContact(contact) {
-  // contact = { pubKeyHex, userId, profile: { name, avatarColor } }
+  // contact = { pubKeyHex, userId, profile, status }
   const db = await openDB();
+  const existing = await idbGet(db, 'contacts', contact.pubKeyHex);
+  if (existing) {
+    // Merge but preserve status unless explicitly passed
+    contact.status = contact.status || existing.status;
+  } else {
+    contact.status = contact.status || 'approved'; // Default for legacy
+  }
+  return idbPut(db, 'contacts', contact);
+}
+
+async function updateContactStatus(pubKeyHex, status) {
+  const db = await openDB();
+  const contact = await idbGet(db, 'contacts', pubKeyHex);
+  if (!contact) return;
+  contact.status = status;
   return idbPut(db, 'contacts', contact);
 }
 
@@ -143,6 +158,30 @@ async function updateMessageStatus(msgId, status) {
   if (!msg) return;
   msg.status = status;
   return idbPut(db, 'messages', msg);
+}
+
+async function getPendingMessages(conversationId) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx    = db.transaction('messages', 'readonly');
+    const index = tx.objectStore('messages').index('by_conv');
+    const range = IDBKeyRange.only(conversationId);
+    const msgs  = [];
+    index.openCursor(range).onsuccess = e => {
+      const cursor = e.target.result;
+      if (!cursor) {
+        // Sort by timestamp
+        msgs.sort((a, b) => a.timestamp - b.timestamp);
+        resolve(msgs);
+        return;
+      }
+      if (cursor.value.status === 'pending') {
+        msgs.push(cursor.value);
+      }
+      cursor.continue();
+    };
+    tx.onerror = e => reject(e.target.error);
+  });
 }
 
 async function deleteAllMessages(conversationId) {

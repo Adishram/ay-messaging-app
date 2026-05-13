@@ -227,28 +227,45 @@ const VideoCallView = {
 
     async startScreenShare() {
         try {
-            if (window.electronAPI && window.electronAPI.getDesktopSources) {
-                const sources = await window.electronAPI.getDesktopSources();
-                if (!sources || sources.length === 0) {
-                    console.warn('[VideoCall] No screen sources available');
-                    return;
+            if (window.electronAPI) {
+                if (window.electronAPI.checkScreenPermission) {
+                    const hasPerm = await window.electronAPI.checkScreenPermission();
+                    if (!hasPerm) {
+                        window.electronAPI.showNotification(
+                            'Permission Required',
+                            'Please allow Screen Recording in System Settings -> Privacy & Security.'
+                        );
+                        return;
+                    }
                 }
 
-                const selectedSource = await this.showScreenPicker(sources);
-                if (!selectedSource) return;
+                if (window.electronAPI.getDesktopSources) {
+                    const sources = await window.electronAPI.getDesktopSources();
+                    if (!sources || sources.length === 0) {
+                        console.warn('[VideoCall] No screen sources available');
+                        return;
+                    }
 
-                this.screenStream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        mandatory: {
-                            chromeMediaSource: 'desktop',
-                            chromeMediaSourceId: selectedSource.id,
-                            maxWidth: 1920,
-                            maxHeight: 1080,
-                            maxFrameRate: 30
+                    const selectedSource = await this.showScreenPicker(sources);
+                    if (!selectedSource) return;
+
+                    this.screenStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            mandatory: {
+                                chromeMediaSource: 'desktop',
+                            }
                         },
-                    },
-                });
+                        video: {
+                            mandatory: {
+                                chromeMediaSource: 'desktop',
+                                chromeMediaSourceId: selectedSource.id,
+                                maxWidth: 1920,
+                                maxHeight: 1080,
+                                maxFrameRate: 30
+                            },
+                        },
+                    });
+                }
             } else {
                 this.screenStream = await navigator.mediaDevices.getDisplayMedia({
                     video: { cursor: 'always' },

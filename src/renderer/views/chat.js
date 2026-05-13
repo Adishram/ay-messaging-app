@@ -24,6 +24,7 @@ const ChatView = {
         };
 
         window.addEventListener('file-received', (e) => this.handleFileReceived(e.detail));
+        window.addEventListener('file-progress', (e) => this.handleFileProgress(e.detail));
     },
 
     setupEventListeners() {
@@ -186,7 +187,13 @@ const ChatView = {
             try {
                 await FileTransfer.sendFile(this.currentPeer.pubKeyHex, file);
                 const conv = await getOrCreateConversationLocal(App.currentUser.pubKeyHex, this.currentPeer.pubKeyHex);
-                const fileUrl = URL.createObjectURL(file);
+                
+                const fileUrl = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.readAsDataURL(file);
+                });
+
                 const isImg = file.type.startsWith('image/');
                 const isVid = file.type.startsWith('video/');
                 let contentHtml = `<a href="${fileUrl}" download="${file.name}" class="file-attachment text-preview">📄 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) - Click to download</a>`;
@@ -281,6 +288,34 @@ const ChatView = {
         }
     },
 
+    handleFileProgress({ fileId, progress, type }) {
+        let bar = document.getElementById('global-progress-bar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'global-progress-bar';
+            bar.className = 'global-progress-bar';
+            
+            const progressFill = document.createElement('div');
+            progressFill.className = 'progress-fill';
+            progressFill.id = 'global-progress-fill';
+            
+            const progressText = document.createElement('span');
+            progressText.id = 'global-progress-text';
+            
+            bar.appendChild(progressFill);
+            bar.appendChild(progressText);
+            document.getElementById('chat-header').after(bar);
+        }
+        
+        document.getElementById('global-progress-fill').style.width = `${progress}%`;
+        document.getElementById('global-progress-text').textContent = `${type === 'upload' ? 'Uploading' : 'Downloading'}... ${progress}%`;
+        bar.classList.remove('hidden');
+
+        if (progress >= 100) {
+            setTimeout(() => { bar.classList.add('hidden'); }, 1500);
+        }
+    },
+
 
 
     handleReceipt(data) {
@@ -311,8 +346,12 @@ const ChatView = {
 
         let statusHtml = '';
         if (isSelf) {
-            const statusClass = msg.status === 'delivered' ? 'status-read' : '';
-            statusHtml = `<svg id="status-${msg.id}" class="message-status ${statusClass}" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M5 13l4 4L19 7"/></svg>`;
+            if (msg.status === 'pending') {
+                statusHtml = `<svg id="status-${msg.id}" class="message-status status-pending" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 15 15"></polyline></svg>`;
+            } else {
+                const statusClass = msg.status === 'delivered' ? 'status-read' : '';
+                statusHtml = `<svg id="status-${msg.id}" class="message-status ${statusClass}" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M5 13l4 4L19 7"/></svg>`;
+            }
         }
 
         let msgContent = msg.type === 'html' ? msg.content : this.escapeHtml(msg.content);

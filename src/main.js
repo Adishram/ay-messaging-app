@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, desktopCapturer, session, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, desktopCapturer, session, shell, safeStorage, systemPreferences } = require('electron');
 const path = require('path');
 const SwarmManager = require('./swarm');
 
@@ -244,4 +244,17 @@ ipcMain.handle('safe-storage-decrypt', (event, encryptedB64) => {
     return safeStorage.decryptString(buffer);
   }
   return null;
+});
+
+// ── Permissions Handlers ────────────────────────────────────────
+
+ipcMain.handle('check-screen-permission', async () => {
+  if (process.platform === 'darwin') {
+    const status = systemPreferences.getMediaAccessStatus('screen');
+    if (status !== 'granted') {
+      return false; // Prompt user to go to Settings -> Privacy -> Screen Recording
+    }
+    return true;
+  }
+  return true; // Windows/Linux usually don't need this specific Electron check
 });

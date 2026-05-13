@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // ── Desktop Sources (screen share) ───────────────────────────
     getDesktopSources: () => ipcRenderer.invoke('get-desktop-sources'),
+    checkScreenPermission: () => ipcRenderer.invoke('check-screen-permission'),
 
     // ── External URLs ────────────────────────────────────────────
     openExternal: (url) => ipcRenderer.invoke('open-external', url),

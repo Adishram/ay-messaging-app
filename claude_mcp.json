@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ay-app-filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/adish./Desktop/A&Y"
+      ]
+    }
+  }
+}

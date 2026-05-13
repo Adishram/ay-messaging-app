@@ -37,11 +37,23 @@ const P2P = {
             this.handleIncoming(from, message);
         });
 
-        window.electronAPI.onSwarmPeerConnected(({ pubKeyHex }) => {
+        window.electronAPI.onSwarmPeerConnected(async ({ pubKeyHex }) => {
             console.log('[P2P] Peer connected:', pubKeyHex.slice(0, 12));
             // Send our profile immediately
             this.sendRaw(pubKeyHex, { type: 'profile', payload: p2pIdentity.profile });
             P2P.onPeerOnline?.(pubKeyHex);
+
+            // Flush pending messages
+            const conv = await getOrCreateConversationLocal(p2pIdentity.pubKeyHex, pubKeyHex);
+            const pendingMsgs = await getPendingMessages(conv.id);
+            for (const msg of pendingMsgs) {
+                console.log('[P2P] Flushing pending message:', msg.id);
+                this.sendRaw(pubKeyHex, { type: 'message', id: msg.id, content: msg.content, timestamp: msg.timestamp });
+                await updateMessageStatus(msg.id, 'sent');
+            }
+            if (pendingMsgs.length > 0 && typeof ChatView !== 'undefined') {
+                ChatView.loadMessages();
+            }
         });
 
         window.electronAPI.onSwarmPeerDisconnected(({ pubKeyHex }) => {
@@ -74,15 +86,15 @@ const P2P = {
 
     async sendMessage(remotePubKeyHex, plaintext) {
         const isConnected = await this.isPeerConnected(remotePubKeyHex);
-        if (!isConnected) throw new Error('Peer not connected');
-
         const conv = await getOrCreateConversationLocal(p2pIdentity.pubKeyHex, remotePubKeyHex);
         const msgId = crypto.randomUUID();
         const timestamp = Date.now();
 
-        // Send over Hyperswarm (already encrypted by Noise protocol)
-        const packet = { type: 'message', id: msgId, content: plaintext, timestamp };
-        this.sendRaw(remotePubKeyHex, packet);
+        if (isConnected) {
+            // Send over Hyperswarm (already encrypted by Noise protocol)
+            const packet = { type: 'message', id: msgId, content: plaintext, timestamp };
+            this.sendRaw(remotePubKeyHex, packet);
+        }
 
         // Save locally
         await saveMessage({
@@ -91,7 +103,7 @@ const P2P = {
             senderId: p2pIdentity.pubKeyHex,
             content: plaintext,
             timestamp,
-            status: 'sent',
+            status: isConnected ? 'sent' : 'pending',
             type: 'text',
         });
         await updateConversationPreview(conv.id, plaintext.slice(0, 60));
@@ -135,11 +147,50 @@ const P2P = {
         switch (msg.type) {
 
             case 'profile': {
+                const existing = await getContact(remotePubKeyHex);
+                if (existing) {
+                    await upsertContact({
+                        pubKeyHex: remotePubKeyHex,
+                        profile: msg.payload,
+                        status: existing.status
+                    });
+                    P2P.onPeerProfile?.({ pubKeyHex: remotePubKeyHex, profile: msg.payload });
+                }
+                break;
+            }
+
+            case 'contact-request': {
                 await upsertContact({
                     pubKeyHex: remotePubKeyHex,
-                    profile: msg.payload,
+                    profile: msg.profile,
+                    status: 'pending_incoming'
                 });
-                P2P.onPeerProfile?.({ pubKeyHex: remotePubKeyHex, profile: msg.payload });
+                if (window.electronAPI) {
+                    window.electronAPI.showNotification('Contact Request', `${msg.profile.name} wants to connect with you.`);
+                }
+                P2P.onContactRequest?.({ pubKeyHex: remotePubKeyHex, profile: msg.profile });
+                break;
+            }
+
+            case 'contact-accept': {
+                await updateContactStatus(remotePubKeyHex, 'approved');
+                if (msg.profile) {
+                    await upsertContact({
+                        pubKeyHex: remotePubKeyHex,
+                        profile: msg.profile,
+                        status: 'approved'
+                    });
+                }
+                if (window.electronAPI) {
+                    window.electronAPI.showNotification('Request Accepted', `Your request was accepted.`);
+                }
+                P2P.onContactAccept?.({ pubKeyHex: remotePubKeyHex });
+                break;
+            }
+
+            case 'contact-decline': {
+                await deleteContact(remotePubKeyHex);
+                P2P.onContactDecline?.({ pubKeyHex: remotePubKeyHex });
                 break;
             }
 
