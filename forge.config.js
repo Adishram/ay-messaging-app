@@ -12,6 +12,10 @@ module.exports = {
             entitlements: 'build/entitlements.mac.plist',
             'entitlements-inherit': 'build/entitlements.mac.plist',
         },
+        extendInfo: {
+            NSMicrophoneUsageDescription: 'A&Y needs microphone access for video and audio calls.',
+            NSCameraUsageDescription: 'A&Y needs camera access for video calls.',
+        },
     },
     makers: [
         {
