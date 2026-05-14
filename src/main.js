@@ -12,6 +12,9 @@ if (userDataDirArg) {
   app.setPath('userData', path.resolve(dir));
 }
 
+// Ensure app name is set for the menu bar
+app.name = 'A&Y';
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,

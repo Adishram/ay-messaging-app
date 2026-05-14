@@ -34,4 +34,9 @@ jobs:
       - name: Build and Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder build --${{ matrix.os == 'macos-latest' && 'mac' || 'win' }} --publish always
+        run: |
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            npx electron-builder build --mac --x64 --arm64 --publish always
+          else
+            npx electron-builder build --win --x64 --publish always
+          fi

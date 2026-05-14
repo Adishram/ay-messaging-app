@@ -1,6 +1,6 @@
 {
   "name": "ay-facetime",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "FaceTime-like video calling & messaging app for macOS & Windows",
   "main": "src/main.js",
   "scripts": {
@@ -12,6 +12,7 @@
   "build": {
     "appId": "com.adishram.aymessaging",
     "productName": "A&Y",
+    "executableName": "ay-facetime",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -40,6 +41,7 @@
       "identity": null,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
       "extendInfo": {
         "NSCameraUsageDescription": "A&Y needs camera access for video calls.",
         "NSMicrophoneUsageDescription": "A&Y needs microphone access for video and audio calls."
@@ -49,7 +51,8 @@
       "target": [
         "nsis"
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
