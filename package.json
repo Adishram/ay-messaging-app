@@ -1,6 +1,6 @@
 {
   "name": "ay-facetime",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "FaceTime-like video calling & messaging app for macOS & Windows",
   "main": "src/main.js",
   "scripts": {
@@ -36,6 +36,10 @@
       "target": [
         "dmg",
         "zip"
+      ],
+      "arch": [
+        "x64",
+        "arm64"
       ],
       "identity": null,
       "entitlements": "build/entitlements.mac.plist",
