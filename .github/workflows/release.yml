@@ -12,6 +12,8 @@ permissions:
 jobs:
   release:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       matrix:
         os: [windows-latest, macos-latest]
