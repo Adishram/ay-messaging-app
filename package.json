@@ -1,17 +1,21 @@
 {
   "name": "ay-facetime",
   "version": "1.0.1",
-  "description": "FaceTime-like video calling & messaging app for macOS",
+  "description": "FaceTime-like video calling & messaging app for macOS & Windows",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "make": "electron-forge make",
-    "dist": "electron-builder --mac --x64 --arm64",
-    "dist:win": "electron-builder --win"
+    "dist": "electron-builder build --mac --win",
+    "publish": "electron-builder build --mac --win --publish always"
   },
   "build": {
     "appId": "com.adishram.aymessaging",
     "productName": "A&Y",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
     "publish": [
       {
         "provider": "github",
@@ -24,26 +28,14 @@
       "package.json",
       "assets/**/*",
       "!dist",
-      "!website",
+      "!ay-website",
       "!out"
     ],
     "mac": {
       "category": "public.app-category.social-networking",
       "target": [
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "identity": null,
       "entitlements": "build/entitlements.mac.plist",
@@ -54,21 +46,24 @@
       }
     },
     "win": {
-      "target": "nsis",
-      "icon": "build/icon.png"
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
     }
   },
   "keywords": [
     "electron",
     "video-call",
     "messaging",
-    "webrtc",
-    "appwrite"
+    "webrtc"
   ],
   "author": "A&Y",
   "license": "MIT",

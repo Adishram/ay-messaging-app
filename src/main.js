@@ -59,7 +59,8 @@ function createWindow() {
       const parsedUrl = new URL(url);
       if (parsedUrl.protocol !== 'file:') {
         event.preventDefault();
-        console.warn(`[Security] Blocked navigation to: ${url}`);
+        shell.openExternal(url);
+        console.warn(`[Security] Blocked navigation and opened externally: ${url}`);
       }
     } catch (e) {
       event.preventDefault();
@@ -69,7 +70,8 @@ function createWindow() {
 
   // ── Block opening new windows ──────────────────────────────────
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    console.warn(`[Security] Blocked new window: ${url}`);
+    shell.openExternal(url);
+    console.warn(`[Security] Blocked new window and opened externally: ${url}`);
     return { action: 'deny' };
   });
 
@@ -139,11 +141,23 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+
+  // ── macOS Media Permission Requests ─────────────────────────────
+  if (process.platform === 'darwin') {
+    systemPreferences.askForMediaAccess('microphone').then((allowed) => {
+      console.log(`[Permissions] Microphone access: ${allowed}`);
+    });
+    systemPreferences.askForMediaAccess('camera').then((allowed) => {
+      console.log(`[Permissions] Camera access: ${allowed}`);
+    });
+  }
 });
 
 app.on('window-all-closed', () => {
   SwarmManager.teardown();
-  app.quit();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
 });
 
 app.on('activate', () => {
