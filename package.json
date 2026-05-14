@@ -1,13 +1,13 @@
 {
   "name": "ay-facetime",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "FaceTime-like video calling & messaging app for macOS & Windows",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "make": "electron-forge make",
-    "dist": "electron-builder build --mac --win",
-    "publish": "electron-builder build --mac --win --publish always"
+    "dist": "electron-builder build --mac --win --x64 --arm64",
+    "publish": "electron-builder build --mac --win --x64 --arm64 --publish always"
   },
   "build": {
     "appId": "com.adishram.aymessaging",
@@ -36,10 +36,6 @@
       "target": [
         "dmg",
         "zip"
-      ],
-      "arch": [
-        "x64",
-        "arm64"
       ],
       "identity": null,
       "entitlements": "build/entitlements.mac.plist",
