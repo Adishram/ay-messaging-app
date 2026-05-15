@@ -108,9 +108,11 @@ app.whenReady().then(async () => {
 
   autoUpdater.on('update-available', () => {
     console.log('[AutoUpdater] Update available.');
+    if (mainWindow) mainWindow.webContents.send('update-available');
   });
   autoUpdater.on('update-downloaded', () => {
     console.log('[AutoUpdater] Update downloaded; will install on restart.');
+    if (mainWindow) mainWindow.webContents.send('update-downloaded');
   });
 
   // ── Permission Handling ─────────────────────────────────────────
@@ -285,4 +287,17 @@ ipcMain.handle('check-screen-permission', async () => {
     return true;
   }
   return true; // Windows/Linux usually don't need this specific Electron check
+});
+
+// ── Auto-Update Handlers ────────────────────────────────────────
+ipcMain.on('restart-app', () => {
+  autoUpdater.quitAndInstall();
+});
+
+// ── Group Topic Handlers ────────────────────────────────────────
+ipcMain.handle('swarm-join-group', async (event, topicHex) => {
+  return await SwarmManager.joinGroup(topicHex);
+});
+ipcMain.handle('swarm-broadcast', (event, { topicHex, message }) => {
+  return SwarmManager.broadcastGroup(topicHex, message);
 });

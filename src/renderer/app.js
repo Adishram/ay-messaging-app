@@ -27,6 +27,17 @@ const App = {
                 this.showView('auth');
             }
 
+            if (window.electronAPI && window.electronAPI.onUpdateDownloaded) {
+                window.electronAPI.onUpdateDownloaded(() => {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-primary';
+                    btn.style = 'position:fixed; bottom:20px; right:20px; z-index:9999;';
+                    btn.innerText = 'Update Ready - Restart';
+                    btn.onclick = () => window.electronAPI.restartApp();
+                    document.body.appendChild(btn);
+                });
+            }
+
             window.App = this;
         } catch (error) {
             console.error('Failed to initialize:', error);

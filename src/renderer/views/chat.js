@@ -364,13 +364,24 @@ const ChatView = {
 
         let msgContent = msg.type === 'html' ? msg.content : this.escapeHtml(msg.content);
 
+        // Add Reply/Copy/Unsend buttons
+        const safeContent = msg.type === 'html' ? 'Media message' : msgContent.replace(/'/g, "\\'");
+        let actionsHtml = `
+            <div class="msg-actions" style="display:none; font-size:10px; cursor:pointer; gap: 8px; margin-top: 4px; opacity: 0.7;">
+                <span onclick="navigator.clipboard.writeText('${safeContent}')">Copy</span>
+                <span onclick="document.getElementById('message-input').value = 'Replying to: ${safeContent.substring(0,20)}... | '">Reply</span>
+                ${isSelf ? `<span onclick="P2P.unsendMessage('${this.currentPeer.pubKeyHex}', '${msg.id}')">Unsend</span>` : ''}
+            </div>
+        `;
+
         el.innerHTML = `
-            <div class="message-bubble">
+            <div class="message-bubble" onmouseenter="this.querySelector('.msg-actions').style.display='flex'" onmouseleave="this.querySelector('.msg-actions').style.display='none'">
                 <div class="message-content">${msgContent}</div>
                 <div class="message-meta">
                     <span class="message-time">${timeStr}</span>
                     ${statusHtml}
                 </div>
+                ${actionsHtml}
             </div>
         `;
         return el;

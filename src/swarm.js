@@ -9,12 +9,14 @@ let swarm = null;
 let mainWindow = null;
 let myPublicKeyHex = null;
 
-// Track connections: pubKeyHex → socket
 const connections = new Map();
 // Track connected peer public keys
 const onlinePeers = new Set();
 // Buffer incoming data per peer (for JSON message framing)
 const peerBuffers = new Map();
+
+// Group Topic Handling
+const activeGroups = new Set();
 
 // ── Initialize ──────────────────────────────────────────────────────
 
@@ -128,9 +130,12 @@ async function connectToPeer(remotePubKeyHex) {
     console.warn('[Swarm] Flush timeout/error for peer:', remotePubKeyHex.slice(0, 16), err.message);
   }
 
-  // Check if we actually connected during the flush
-  if (connections.has(remotePubKeyHex)) {
-    return { status: 'connected' };
+  // Wait up to 3 seconds for socket to actually form (fixes 3-tries bug)
+  for (let i = 0; i < 6; i++) {
+    if (connections.has(remotePubKeyHex)) {
+      return { status: 'connected' };
+    }
+    await new Promise(r => setTimeout(r, 500));
   }
 
   // Not connected yet — peer may come online later
@@ -226,11 +231,32 @@ async function teardown() {
     connections.clear();
     onlinePeers.clear();
     peerBuffers.clear();
+    activeGroups.clear();
     
     await swarm.destroy();
     swarm = null;
     myPublicKeyHex = null;
     console.log('[Swarm] Torn down');
+  }
+}
+
+async function joinGroup(topicHex) {
+  if (!swarm) return;
+  const topic = b4a.from(topicHex, 'hex');
+  swarm.join(topic, { server: true, client: true });
+  activeGroups.add(topicHex);
+  await swarm.flush();
+}
+
+function broadcastGroup(topicHex, message) {
+  // Simple broadcast to all connected peers
+  for (const [pubKey, socket] of connections.entries()) {
+    try {
+      const data = JSON.stringify({ ...message, groupTopic: topicHex }) + '\n';
+      socket.write(data);
+    } catch (err) {
+      console.warn('[Swarm] Group broadcast failed to', pubKey.slice(0, 16), err.message);
+    }
   }
 }
 
@@ -244,4 +270,6 @@ module.exports = {
   getOnlinePeers,
   getPublicKeyHex,
   teardown,
+  joinGroup,
+  broadcastGroup,
 };

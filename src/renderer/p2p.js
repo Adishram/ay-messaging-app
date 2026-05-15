@@ -121,8 +121,19 @@ const P2P = {
         this.sendRaw(remotePubKeyHex, { type: 'call-signal', data: signalData });
     },
 
-    sendCallRequest(remotePubKeyHex, callerName) {
-        this.sendRaw(remotePubKeyHex, { type: 'call-request', callerName });
+    async sendCallRequest(remotePubKeyHex, callerName) {
+        let acked = false;
+        const ackListener = (e) => {
+            if (e.detail === remotePubKeyHex) acked = true;
+        };
+        window.addEventListener('call-ack', ackListener);
+        
+        for (let i = 0; i < 3; i++) {
+            this.sendRaw(remotePubKeyHex, { type: 'call-request', callerName });
+            await new Promise(r => setTimeout(r, 2000));
+            if (acked) break;
+        }
+        window.removeEventListener('call-ack', ackListener);
     },
 
     sendCallAccepted(remotePubKeyHex) {
@@ -139,6 +150,19 @@ const P2P = {
 
     sendCallBusy(remotePubKeyHex) {
         this.sendRaw(remotePubKeyHex, { type: 'call-busy' });
+    },
+
+    // ── Groups & Unsend ──────────────────────────────────────────
+
+    async unsendMessage(remotePubKeyHex, msgId) {
+        this.sendRaw(remotePubKeyHex, { type: 'unsend', msgId });
+        await deleteMessage(msgId);
+        const el = document.querySelector(`[data-id="${msgId}"]`);
+        if (el) el.remove();
+    },
+
+    async sendGroupMessage(topicHex, plaintext) {
+        window.electronAPI.swarmBroadcast(topicHex, { type: 'group-message', content: plaintext, senderId: p2pIdentity.pubKeyHex });
     },
 
     // ── Incoming message handler ──────────────────────────────────
@@ -249,7 +273,32 @@ const P2P = {
             }
 
             case 'call-request': {
+                this.sendRaw(remotePubKeyHex, { type: 'call-ack' }); // ACK immediately
                 VideoCallView.handleIncomingCall(remotePubKeyHex, msg.callerName);
+                break;
+            }
+
+            case 'call-ack': {
+                window.dispatchEvent(new CustomEvent('call-ack', { detail: remotePubKeyHex }));
+                break;
+            }
+
+            case 'unsend': {
+                await deleteMessage(msg.msgId);
+                const el = document.querySelector(`[data-id="${msg.msgId}"]`);
+                if (el) el.remove();
+                break;
+            }
+
+            case 'group-message': {
+                P2P.onMessage?.({ 
+                    remotePubKeyHex: msg.senderId, 
+                    plaintext: msg.content, 
+                    msgId: crypto.randomUUID(), 
+                    timestamp: Date.now(), 
+                    isGroup: true, 
+                    topicHex: msg.groupTopic 
+                });
                 break;
             }
 

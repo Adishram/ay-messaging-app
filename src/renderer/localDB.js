@@ -7,6 +7,7 @@ const STORES = {
   contacts:      { keyPath: 'pubKeyHex' },
   conversations: { keyPath: 'id' },
   messages:      { keyPath: 'id', autoIncrement: true },
+  groups:        { keyPath: 'id' },
 };
 
 let _db = null;
@@ -267,4 +268,23 @@ function idbAdd(db, store, val) {
 async function sha256Hex(str) {
   const buf  = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
   return [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+
+async function deleteMessage(msgId) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const req = db.transaction('messages', 'readwrite').objectStore('messages').delete(msgId);
+    req.onsuccess = () => res();
+    req.onerror = e => rej(e.target.error);
+  });
+}
+
+async function upsertGroup(group) {
+  const db = await openDB();
+  return idbPut(db, 'groups', group);
+}
+
+async function getGroupsLocal() {
+  const db = await openDB();
+  return idbGetAll(db, 'groups');
 }

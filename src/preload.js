@@ -38,4 +38,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onSwarmOnlinePeers: (callback) => {
         ipcRenderer.on('swarm-online-peers', (event, peers) => callback(peers));
     },
+
+    // ── Groups & Update Events ───────────────────────────────────
+    swarmJoinGroup: (topicHex) => ipcRenderer.invoke('swarm-join-group', topicHex),
+    swarmBroadcast: (topicHex, msg) => ipcRenderer.invoke('swarm-broadcast', { topicHex, message: msg }),
+    onUpdateDownloaded: (callback) => ipcRenderer.on('update-downloaded', callback),
+    restartApp: () => ipcRenderer.send('restart-app'),
 });
